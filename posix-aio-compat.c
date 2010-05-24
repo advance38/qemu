@@ -53,7 +53,7 @@ struct qemu_paiocb {
 };
 
 typedef struct PosixAioState {
-    int rfd, wfd;
+    EventNotifier notifier;
     struct qemu_paiocb *first_aio;
 } PosixAioState;
 
@@ -469,23 +469,10 @@ static int posix_aio_process_queue(void *opaque)
     return result;
 }
 
-static void posix_aio_read(void *opaque)
+static void posix_aio_read(EventNotifier *notifier)
 {
-    PosixAioState *s = opaque;
-    ssize_t len;
-
-    /* read all bytes from signal pipe */
-    for (;;) {
-        char bytes[16];
-
-        len = read(s->rfd, bytes, sizeof(bytes));
-        if (len == -1 && errno == EINTR)
-            continue; /* try again */
-        if (len == sizeof(bytes))
-            continue; /* more to read */
-        break;
-    }
-
+    PosixAioState *s = container_of(notifier, PosixAioState, notifier);
+    event_notifier_test_and_clear(notifier);
     posix_aio_process_queue(s);
 }
 
@@ -500,14 +487,8 @@ static PosixAioState *posix_aio_state;
 static void aio_signal_handler(int signum)
 {
     if (posix_aio_state) {
-        char byte = 0;
-        ssize_t ret;
-
-        ret = write(posix_aio_state->wfd, &byte, sizeof(byte));
-        if (ret < 0 && errno != EAGAIN)
-            die("write()");
+	event_notifier_set(&posix_aio_state->notifier);
     }
-
     qemu_service_io();
 }
 
@@ -633,16 +614,10 @@ int paio_init(void)
         return -1;
     }
 
-    s->rfd = fds[0];
-    s->wfd = fds[1];
-
-    fcntl(s->rfd, F_SETFL, O_NONBLOCK);
-    fcntl(s->wfd, F_SETFL, O_NONBLOCK);
-
+    event_notifier_init(&s->notifier);
     qemu_aio_set_handler(s,
         posix_aio_flush, posix_aio_process_queue);
-    qemu_set_fd_handler(s->rfd,
-	posix_aio_read, NULL, s);
+    event_notifier_set_handler(s, posix_aio_read);
 
     ret = pthread_attr_init(&attr);
     if (ret)
