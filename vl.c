@@ -1853,21 +1853,14 @@ static void host_main_loop_wait(int *timeout)
 }
 #endif
 
-void main_loop_wait(int nonblocking)
+static void main_loop_iterate(int timeout)
 {
     IOHandlerRecord *ioh;
     fd_set rfds, wfds, xfds;
     int ret, nfds;
     struct timeval tv;
-    int timeout;
 
-    if (nonblocking)
-        timeout = 0;
-    else {
-        timeout = qemu_calculate_timeout();
-        qemu_bh_update_timeout(&timeout);
-    }
-
+    qemu_bh_update_timeout(&timeout);
     host_main_loop_wait(&timeout);
 
     /* poll any events */
@@ -1893,13 +1886,17 @@ void main_loop_wait(int nonblocking)
         }
     }
 
-    tv.tv_sec = timeout / 1000;
-    tv.tv_usec = (timeout % 1000) * 1000;
-
     slirp_select_fill(&nfds, &rfds, &wfds, &xfds);
 
     qemu_mutex_unlock_iothread();
-    ret = select(nfds + 1, &rfds, &wfds, &xfds, &tv);
+    if (timeout == -1) {
+	ret = select(nfds + 1, &rfds, &wfds, &xfds, NULL);
+    } else {
+	tv.tv_sec = timeout / 1000;
+	tv.tv_usec = (timeout % 1000) * 1000;
+	ret = select(nfds + 1, &rfds, &wfds, &xfds, &tv);
+    }
+
     qemu_mutex_lock_iothread();
     if (ret > 0) {
         IOHandlerRecord *pioh;
@@ -1920,13 +1917,24 @@ void main_loop_wait(int nonblocking)
     }
 
     slirp_select_poll(&rfds, &wfds, &xfds, (ret < 0));
+}
+
+void main_loop_wait(bool nonblocking)
+{
+    if (nonblocking) {
+	timeout = 0;
+    } else {
+	timeout = qemu_calculate_timeout();
+	assert (timeout >= 0);
+    }
+
+    main_loop_iterate(timeout);
 
     qemu_run_all_timers();
 
     /* Check bottom-halves last in case any of the earlier events triggered
        them.  */
     qemu_bh_poll();
-
 }
 
 static int vm_can_run(void)
