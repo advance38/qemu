@@ -58,8 +58,8 @@ typedef struct PosixAioState {
 } PosixAioState;
 
 
-static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+static QemuMutex lock;
+static QemuCond cond;
 static pthread_t thread_id;
 static pthread_attr_t attr;
 static int max_threads = 64;
@@ -82,32 +82,6 @@ static void die2(int err, const char *what)
 static void die(const char *what)
 {
     die2(errno, what);
-}
-
-static void mutex_lock(pthread_mutex_t *mutex)
-{
-    int ret = pthread_mutex_lock(mutex);
-    if (ret) die2(ret, "pthread_mutex_lock");
-}
-
-static void mutex_unlock(pthread_mutex_t *mutex)
-{
-    int ret = pthread_mutex_unlock(mutex);
-    if (ret) die2(ret, "pthread_mutex_unlock");
-}
-
-static int cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
-                           struct timespec *ts)
-{
-    int ret = pthread_cond_timedwait(cond, mutex, ts);
-    if (ret && ret != ETIMEDOUT) die2(ret, "pthread_cond_timedwait");
-    return ret;
-}
-
-static void cond_signal(pthread_cond_t *cond)
-{
-    int ret = pthread_cond_signal(cond);
-    if (ret) die2(ret, "pthread_cond_signal");
 }
 
 static void thread_create(pthread_t *thread, pthread_attr_t *attr,
@@ -309,18 +283,12 @@ static void *aio_thread(void *unused)
     while (1) {
         struct qemu_paiocb *aiocb;
         ssize_t ret = 0;
-        qemu_timeval tv;
-        struct timespec ts;
 
-        qemu_gettimeofday(&tv);
-        ts.tv_sec = tv.tv_sec + 10;
-        ts.tv_nsec = 0;
-
-        mutex_lock(&lock);
+        qemu_mutex_lock(&lock);
 
         while (QTAILQ_EMPTY(&request_list) &&
                !(ret == ETIMEDOUT)) {
-            ret = cond_timedwait(&cond, &lock, &ts);
+            ret = qemu_cond_timedwait(&cond, &lock, 10000);
         }
 
         if (QTAILQ_EMPTY(&request_list))
@@ -330,7 +298,7 @@ static void *aio_thread(void *unused)
         QTAILQ_REMOVE(&request_list, aiocb, node);
         aiocb->active = 1;
         idle_threads--;
-        mutex_unlock(&lock);
+        qemu_mutex_unlock(&lock);
 
         switch (aiocb->aio_type & QEMU_AIO_TYPE_MASK) {
         case QEMU_AIO_READ:
@@ -349,17 +317,17 @@ static void *aio_thread(void *unused)
 		break;
 	}
 
-        mutex_lock(&lock);
+        qemu_mutex_lock(&lock);
         aiocb->ret = ret;
         idle_threads++;
-        mutex_unlock(&lock);
+        qemu_mutex_unlock(&lock);
 
         if (kill(pid, aiocb->ev_signo)) die("kill failed");
     }
 
     idle_threads--;
     cur_threads--;
-    mutex_unlock(&lock);
+    qemu_mutex_unlock(&lock);
 
     return NULL;
 }
@@ -384,21 +352,21 @@ static void qemu_paio_submit(struct qemu_paiocb *aiocb)
 {
     aiocb->ret = -EINPROGRESS;
     aiocb->active = 0;
-    mutex_lock(&lock);
+    qemu_mutex_lock(&lock);
     if (idle_threads == 0 && cur_threads < max_threads)
         spawn_thread();
     QTAILQ_INSERT_TAIL(&request_list, aiocb, node);
-    mutex_unlock(&lock);
-    cond_signal(&cond);
+    qemu_mutex_unlock(&lock);
+    qemu_cond_signal(&cond);
 }
 
 static ssize_t qemu_paio_return(struct qemu_paiocb *aiocb)
 {
     ssize_t ret;
 
-    mutex_lock(&lock);
+    qemu_mutex_lock(&lock);
     ret = aiocb->ret;
-    mutex_unlock(&lock);
+    qemu_mutex_unlock(&lock);
 
     return ret;
 }
@@ -516,14 +484,14 @@ static void paio_cancel(BlockDriverAIOCB *blockacb)
     struct qemu_paiocb *acb = (struct qemu_paiocb *)blockacb;
     int active = 0;
 
-    mutex_lock(&lock);
+    qemu_mutex_lock(&lock);
     if (!acb->active) {
         QTAILQ_REMOVE(&request_list, acb, node);
         acb->ret = -ECANCELED;
     } else if (acb->ret == -EINPROGRESS) {
         active = 1;
     }
-    mutex_unlock(&lock);
+    qemu_mutex_unlock(&lock);
 
     if (active) {
         /* fail safe: if the aio could not be canceled, we wait for
@@ -600,6 +568,9 @@ int paio_init(void)
 
     if (posix_aio_state)
         return 0;
+
+    qemu_mutex_init(&lock);
+    qemu_cond_init(&cond);
 
     s = qemu_malloc(sizeof(PosixAioState));
 
