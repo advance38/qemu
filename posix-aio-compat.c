@@ -639,8 +639,10 @@ int paio_init(void)
     fcntl(s->rfd, F_SETFL, O_NONBLOCK);
     fcntl(s->wfd, F_SETFL, O_NONBLOCK);
 
-    qemu_aio_set_fd_handler(s->rfd, posix_aio_read, NULL, posix_aio_flush,
-        posix_aio_process_queue, s);
+    qemu_aio_set_handler(s,
+        posix_aio_flush, posix_aio_process_queue);
+    qemu_set_fd_handler(s->rfd,
+	posix_aio_read, NULL, s);
 
     ret = pthread_attr_init(&attr);
     if (ret)

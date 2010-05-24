@@ -248,8 +248,10 @@ void *laio_init(void)
     if (io_setup(MAX_EVENTS, &s->ctx) != 0)
         goto out_close_efd;
 
-    qemu_aio_set_fd_handler(s->efd, qemu_laio_completion_cb, NULL,
-        qemu_laio_flush_cb, qemu_laio_process_requests, s);
+    qemu_aio_set_handler(s,
+        qemu_laio_flush_cb, qemu_laio_process_requests);
+    qemu_set_fd_handler(s->efd,
+	qemu_laio_completion_cb, NULL, s);
 
     return s;
 
