@@ -213,6 +213,23 @@ void qemu_notify_event(void)
     }
 }
 
+void qemu_get_ioready(QemuEvCounterState *state)
+{
+}
+
+void qemu_put_ioready(void)
+{
+}
+
+void qemu_wait_ioready(QemuEvCounterState *state)
+{
+    main_loop_iterate(-1);
+}
+
+void qemu_broadcast_ioready(void)
+{
+}
+
 void qemu_mutex_lock_iothread(void) {}
 void qemu_mutex_unlock_iothread(void) {}
 
@@ -241,6 +258,9 @@ static QemuCond qemu_system_cond;
 static QemuCond qemu_pause_cond;
 static QemuCond qemu_work_cond;
 
+/* IO signal */
+static QemuEvCounter qemu_ioready_counter;
+
 static void tcg_init_ipi(void);
 static void kvm_init_ipi(CPUState *env);
 static void unblock_io_signals(void);
@@ -257,6 +277,8 @@ int qemu_init_main_loop(void)
     qemu_mutex_init(&qemu_fair_mutex);
     qemu_mutex_init(&qemu_global_mutex);
     qemu_mutex_lock(&qemu_global_mutex);
+
+    qemu_evcounter_init(&qemu_ioready_counter);
 
     unblock_io_signals();
     qemu_thread_self(&io_thread);
@@ -502,6 +524,26 @@ static void unblock_io_signals(void)
     sigemptyset(&set);
     sigaddset(&set, SIG_IPI);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
+}
+
+void qemu_get_ioready(QemuEvCounterState *state)
+{
+    qemu_evcounter_get(state, &qemu_ioready_counter);
+}
+
+void qemu_put_ioready(void)
+{
+    qemu_evcounter_put(&qemu_ioready_counter);
+}
+
+void qemu_wait_ioready(QemuEvCounterState *state)
+{
+    qemu_evcounter_wait(state, &qemu_ioready_counter);
+}
+
+void qemu_broadcast_ioready(void)
+{
+    qemu_evcounter_signal(&qemu_ioready_counter);
 }
 
 void qemu_mutex_lock_iothread(void)

@@ -1917,6 +1917,7 @@ static void main_loop_iterate(int timeout)
     }
 
     slirp_select_poll(&rfds, &wfds, &xfds, (ret < 0));
+    qemu_broadcast_ioready();
 }
 
 void main_loop_wait(bool nonblocking)

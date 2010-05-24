@@ -171,6 +171,10 @@ char *qemu_strndup(const char *str, size_t size);
 
 void *get_mmap_addr(unsigned long size);
 
+void qemu_get_ioready(QemuEvCounterState *state);
+void qemu_put_ioready(void);
+void qemu_wait_ioready(QemuEvCounterState *state);
+void qemu_broadcast_ioready(void);
 
 void qemu_mutex_lock_iothread(void);
 void qemu_mutex_unlock_iothread(void);
