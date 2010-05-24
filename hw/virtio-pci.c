@@ -420,8 +420,8 @@ static unsigned virtio_pci_get_features(void *opaque)
 
 static void virtio_pci_guest_notifier_read(void *opaque)
 {
-    VirtQueue *vq = opaque;
-    EventNotifier *n = virtio_queue_get_guest_notifier(vq);
+    EventNotifier *n = opaque;
+    VirtQueue *vq = virtqueue_from_guest_notifier(n);
     if (event_notifier_test_and_clear(n)) {
         virtio_irq(vq);
     }
@@ -431,8 +431,7 @@ static int virtio_pci_mask_notifier(PCIDevice *dev, unsigned vector,
                                     void *opaque, int masked)
 {
 #ifdef CONFIG_KVM
-    VirtQueue *vq = opaque;
-    EventNotifier *notifier = virtio_queue_get_guest_notifier(vq);
+    EventNotifier *notifier = opaque;
     int r = kvm_set_irqfd(dev->msix_irq_entries[vector].gsi,
                           event_notifier_get_fd(notifier),
                           !masked);
@@ -441,7 +440,7 @@ static int virtio_pci_mask_notifier(PCIDevice *dev, unsigned vector,
     }
     if (masked) {
         qemu_set_fd_handler(event_notifier_get_fd(notifier),
-                            virtio_pci_guest_notifier_read, NULL, vq);
+                            virtio_pci_guest_notifier_read, NULL, notifier);
     } else {
         qemu_set_fd_handler(event_notifier_get_fd(notifier),
                             NULL, NULL, NULL);
@@ -464,9 +463,9 @@ static int virtio_pci_set_guest_notifier(void *opaque, int n, bool assign)
             return r;
         }
         qemu_set_fd_handler(event_notifier_get_fd(notifier),
-                            virtio_pci_guest_notifier_read, NULL, vq);
+                            virtio_pci_guest_notifier_read, NULL, notifier);
         msix_set_mask_notifier(&proxy->pci_dev,
-                               virtio_queue_vector(proxy->vdev, n), vq);
+                               virtio_queue_vector(proxy->vdev, n), notifier);
     } else {
         msix_unset_mask_notifier(&proxy->pci_dev,
 				 virtio_queue_vector(proxy->vdev, n));
@@ -474,7 +473,7 @@ static int virtio_pci_set_guest_notifier(void *opaque, int n, bool assign)
                             NULL, NULL, NULL);
         /* Test and clear notifier before closing it,
          * in case poll callback didn't have time to run. */
-        virtio_pci_guest_notifier_read(vq);
+        virtio_pci_guest_notifier_read(notifier);
         event_notifier_cleanup(notifier);
     }
 
