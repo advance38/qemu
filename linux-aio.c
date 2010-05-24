@@ -37,7 +37,7 @@ struct qemu_laiocb {
 
 struct qemu_laio_state {
     io_context_t ctx;
-    int efd;
+    EventNotifier notifier;
     int count;
     QLIST_HEAD(, qemu_laiocb) completed_reqs;
 };
@@ -121,15 +121,8 @@ static void qemu_laio_completion_cb(void *opaque)
         struct timespec ts = { 0 };
         int nevents, i;
 
-        do {
-            ret = read(s->efd, &val, sizeof(val));
-        } while (ret == -1 && errno == EINTR);
-
-        if (ret == -1 && errno == EAGAIN)
-            break;
-
-        if (ret != 8)
-            break;
+	if (!event_notifier_test_and_clear(&s->notifier))
+	    break;
 
         do {
             nevents = io_getevents(s->ctx, val, MAX_EVENTS, events, &ts);
@@ -220,7 +213,7 @@ BlockDriverAIOCB *laio_submit(BlockDriverState *bs, void *aio_ctx, int fd,
                         __func__, type);
         goto out_free_aiocb;
     }
-    io_set_eventfd(&laiocb->iocb, s->efd);
+    io_set_eventfd(&laiocb->iocb, event_notifier_get_fd(&s->notifier));
     s->count++;
 
     if (io_submit(s->ctx, 1, &iocbs) < 0)
@@ -240,23 +233,19 @@ void *laio_init(void)
 
     s = qemu_mallocz(sizeof(*s));
     QLIST_INIT(&s->completed_reqs);
-    s->efd = eventfd(0, 0);
-    if (s->efd == -1)
-        goto out_free_state;
-    fcntl(s->efd, F_SETFL, O_NONBLOCK);
+    event_notifier_init(&e->notifier, 0);
 
     if (io_setup(MAX_EVENTS, &s->ctx) != 0)
-        goto out_close_efd;
+        goto out_cleanup_notifier;
 
     qemu_aio_set_handler(s,
         qemu_laio_flush_cb, qemu_laio_process_requests);
-    qemu_set_fd_handler(s->efd,
-	qemu_laio_completion_cb, NULL, s);
+    event_notifier_set_handler(&e->notifier, qemu_laio_completion_cb);
 
     return s;
 
-out_close_efd:
-    close(s->efd);
+out_cleanup_notifier:
+    event_notifier_cleanup(&e->notifier);
 out_free_state:
     qemu_free(s);
     return NULL;
