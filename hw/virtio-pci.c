@@ -564,9 +564,8 @@ static unsigned virtio_pci_get_features(void *opaque)
     return proxy->host_features;
 }
 
-static void virtio_pci_guest_notifier_read(void *opaque)
+static void virtio_pci_guest_notifier_read(EventNotifier *n)
 {
-    EventNotifier *n = opaque;
     VirtQueue *vq = virtqueue_from_guest_notifier(n);
     if (event_notifier_test_and_clear(n)) {
         virtio_irq(vq);
@@ -584,11 +583,9 @@ static int virtio_pci_set_guest_notifier(void *opaque, int n, bool assign)
         if (r < 0) {
             return r;
         }
-        qemu_set_fd_handler(event_notifier_get_fd(notifier),
-                            virtio_pci_guest_notifier_read, NULL, notifier);
+        event_notifier_set_handler(notifier, virtio_pci_guest_notifier_read);
     } else {
-        qemu_set_fd_handler(event_notifier_get_fd(notifier),
-                            NULL, NULL, NULL);
+        event_notifier_set_handler(notifier, NULL);
         event_notifier_cleanup(notifier);
     }
 
