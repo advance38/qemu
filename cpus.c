@@ -26,6 +26,7 @@
 #include "config-host.h"
 
 #include "monitor.h"
+#include "event_notifier.h"
 #include "sysemu.h"
 #include "gdbstub.h"
 #include "dma.h"
@@ -241,71 +242,21 @@ static void qemu_init_sigbus(void)
 }
 #endif /* !CONFIG_LINUX */
 
-#ifndef _WIN32
-static int io_thread_fd = -1;
-
-static void qemu_event_increment(void)
-{
-    /* Write 8 bytes to be compatible with eventfd.  */
-    static const uint64_t val = 1;
-    ssize_t ret;
-
-    if (io_thread_fd == -1) {
-        return;
-    }
-    do {
-        ret = write(io_thread_fd, &val, sizeof(val));
-    } while (ret < 0 && errno == EINTR);
-
-    /* EAGAIN is fine, a read must be pending.  */
-    if (ret < 0 && errno != EAGAIN) {
-        fprintf(stderr, "qemu_event_increment: write() filed: %s\n",
-                strerror(errno));
-        exit (1);
-    }
-}
-
-static void qemu_event_read(void *opaque)
-{
-    int fd = (unsigned long)opaque;
-    ssize_t len;
-    char buffer[512];
-
-    /* Drain the notify pipe.  For eventfd, only 8 bytes will be read.  */
-    do {
-        len = read(fd, buffer, sizeof(buffer));
-    } while ((len == -1 && errno == EINTR) || len == sizeof(buffer));
-}
+static EventNotifier io_thread_notifier;
 
 int qemu_event_init(void)
 {
     int err;
-    int fds[2];
+    err = event_notifier_init(&io_thread_notifier, 0);
+    if (err == 0)
+        event_notifier_set_handler(&io_thread_notifier,
+                                   (EventNotifierHandler *)
+                                   event_notifier_test_and_clear);
 
-    err = qemu_eventfd(fds);
-    if (err == -1) {
-        return -errno;
-    }
-    err = fcntl_setfl(fds[0], O_NONBLOCK);
-    if (err < 0) {
-        goto fail;
-    }
-    err = fcntl_setfl(fds[1], O_NONBLOCK);
-    if (err < 0) {
-        goto fail;
-    }
-    qemu_set_fd_handler2(fds[0], NULL, qemu_event_read, NULL,
-                         (void *)(unsigned long)fds[0]);
-
-    io_thread_fd = fds[1];
-    return 0;
-
-fail:
-    close(fds[0]);
-    close(fds[1]);
     return err;
 }
 
+#ifndef _WIN32
 static void dummy_signal(int sig)
 {
 }
@@ -407,32 +358,6 @@ static void qemu_kvm_eat_signals(CPUState *env)
 }
 
 #else /* _WIN32 */
-
-HANDLE qemu_event_handle;
-
-static void dummy_event_handler(void *opaque)
-{
-}
-
-int qemu_event_init(void)
-{
-    qemu_event_handle = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!qemu_event_handle) {
-        fprintf(stderr, "Failed CreateEvent: %ld\n", GetLastError());
-        return -1;
-    }
-    qemu_add_wait_object(qemu_event_handle, dummy_event_handler, NULL);
-    return 0;
-}
-
-static void qemu_event_increment(void)
-{
-    if (!SetEvent(qemu_event_handle)) {
-        fprintf(stderr, "qemu_event_increment: SetEvent failed: %ld\n",
-                GetLastError());
-        exit (1);
-    }
-}
 
 static void qemu_kvm_eat_signals(CPUState *env)
 {
@@ -566,7 +491,7 @@ void qemu_notify_event(void)
 {
     CPUState *env = cpu_single_env;
 
-    qemu_event_increment ();
+    event_notifier_set(&io_thread_notifier);
     if (env) {
         cpu_exit(env);
     }
@@ -1000,7 +925,7 @@ void qemu_init_vcpu(void *_env)
 
 void qemu_notify_event(void)
 {
-    qemu_event_increment();
+    event_notifier_set(&io_thread_notifier);
 }
 
 void cpu_stop_current(void)
