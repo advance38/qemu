@@ -16,18 +16,21 @@
 #include "qemu-common.h"
 
 struct EventNotifier {
-        int fd;
+    int rfd;
+    int wfd;
 };
 
 typedef void EventNotifierHandler(EventNotifier *);
 
 int event_notifier_init(EventNotifier *, int active);
 void event_notifier_cleanup(EventNotifier *);
-int event_notifier_get_fd(EventNotifier *);
 int event_notifier_set(EventNotifier *);
 int event_notifier_test_and_clear(EventNotifier *);
 int event_notifier_set_handler(EventNotifier *, EventNotifierHandler *);
 
+#ifdef CONFIG_EVENTFD
 void event_notifier_init_fd(EventNotifier *, int);
+int event_notifier_get_fd(EventNotifier *);
+#endif
 
 #endif
