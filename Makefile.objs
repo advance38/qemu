@@ -91,7 +91,9 @@ common-obj-y += bt-host.o bt-vhci.o
 
 common-obj-y += acl.o
 common-obj-$(CONFIG_POSIX) += compatfd.o
-common-obj-y += notify.o event_notifier.o
+common-obj-y += notify.o
+common-obj-$(CONFIG_POSIX) += event_notifier-posix.o
+common-obj-$(CONFIG_WIN32) += event_notifier-win32.o
 common-obj-y += qemu-timer.o qemu-timer-common.o
 
 common-obj-$(CONFIG_SLIRP) += slirp/
