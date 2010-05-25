@@ -25,12 +25,6 @@ struct QemuEvCounter {
 #endif
 };
 
-typedef struct QemuMutex QemuMutex;
-typedef struct QemuCond QemuCond;
-typedef struct QemuThread QemuThread;
-typedef struct QemuEvCounter QemuEvCounter;
-typedef int QemuEvCounterState;
-
 void qemu_mutex_init(QemuMutex *mutex);
 void qemu_mutex_lock(QemuMutex *mutex);
 int qemu_mutex_trylock(QemuMutex *mutex);

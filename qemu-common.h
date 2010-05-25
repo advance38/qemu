@@ -17,6 +17,12 @@ typedef struct QEMUTimer QEMUTimer;
 typedef struct QEMUFile QEMUFile;
 typedef struct QEMUBH QEMUBH;
 
+typedef struct QemuMutex QemuMutex;
+typedef struct QemuCond QemuCond;
+typedef struct QemuThread QemuThread;
+typedef struct QemuEvCounter QemuEvCounter;
+typedef int QemuEvCounterState;
+
 /* Hack around the mess dyngen-exec.h causes: We need QEMU_NORETURN in files that
    cannot include the following headers without conflicts. This condition has
    to be removed once dyngen is gone. */
