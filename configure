@@ -983,9 +983,10 @@ if test "$nptl" != "no" ; then
   cat > $TMPC <<EOF
 #include <sched.h>
 #include <linux/futex.h>
+#include <sys/syscall.h>
 void foo()
 {
-#if !defined(CLONE_SETTLS) || !defined(FUTEX_WAIT)
+#if !defined(CLONE_SETTLS) || !defined(FUTEX_WAIT) || !defined(__NR_futex)
 #error bork
 #endif
 }
@@ -2196,6 +2197,9 @@ if test "$accept4" = "yes" ; then
 fi
 if test "$splice" = "yes" ; then
   echo "CONFIG_SPLICE=y" >> $config_host_mak
+fi
+if test "$nptl" = "yes" ; then
+  echo "CONFIG_FUTEX=y" >> $config_host_mak
 fi
 if test "$eventfd" = "yes" ; then
   echo "CONFIG_EVENTFD=y" >> $config_host_mak
