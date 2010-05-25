@@ -227,7 +227,6 @@ static int do_save_vmstate(char *buf, int64_t offset, int count, int *total)
 	return 1;
 }
 
-#define NOT_DONE 0x7fffffff
 static void aio_rw_done(void *opaque, int ret)
 {
 	*(int *)opaque = ret;
@@ -243,8 +242,7 @@ static int do_aio_readv(QEMUIOVector *qiov, int64_t offset, int *total)
 	if (!acb)
 		return -EIO;
 
-	while (async_ret == NOT_DONE)
-		qemu_aio_wait();
+        qemu_aio_wait(&async_ret);
 
 	*total = qiov->size;
 	return async_ret < 0 ? async_ret : 1;
@@ -260,8 +258,7 @@ static int do_aio_writev(QEMUIOVector *qiov, int64_t offset, int *total)
 	if (!acb)
 		return -EIO;
 
-	while (async_ret == NOT_DONE)
-		qemu_aio_wait();
+        qemu_aio_wait(&async_ret);
 
 	*total = qiov->size;
 	return async_ret < 0 ? async_ret : 1;

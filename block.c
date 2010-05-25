@@ -2182,8 +2182,6 @@ static void bdrv_rw_em_cb(void *opaque, int ret)
     *(int *)opaque = ret;
 }
 
-#define NOT_DONE 0x7fffffff
-
 static int bdrv_read_em(BlockDriverState *bs, int64_t sector_num,
                         uint8_t *buf, int nb_sectors)
 {
@@ -2205,10 +2203,7 @@ static int bdrv_read_em(BlockDriverState *bs, int64_t sector_num,
         goto fail;
     }
 
-    while (async_ret == NOT_DONE) {
-        qemu_aio_wait();
-    }
-
+    qemu_aio_wait(&async_ret);
 
 fail:
     async_context_pop();
@@ -2235,9 +2230,7 @@ static int bdrv_write_em(BlockDriverState *bs, int64_t sector_num,
         async_ret = -1;
         goto fail;
     }
-    while (async_ret == NOT_DONE) {
-        qemu_aio_wait();
-    }
+    qemu_aio_wait(&async_ret);
 
 fail:
     async_context_pop();

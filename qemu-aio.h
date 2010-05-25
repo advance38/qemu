@@ -17,6 +17,8 @@
 #include "qemu-common.h"
 #include "qemu-char.h"
 
+#define NOT_DONE 0x7fffffff
+
 /* Returns 1 if there are still outstanding AIO requests; 0 otherwise */
 typedef int (AioFlushHandler)(void *opaque);
 
@@ -29,11 +31,11 @@ typedef int (AioProcessQueue)(void *opaque);
  * outstanding AIO operations have been completed or cancelled. */
 void qemu_aio_flush(void);
 
-/* Wait for a single AIO completion to occur.  This function will wait
- * until a single AIO event has completed and it will ensure something
- * has moved before returning. This can issue new pending aio as
+/* Wait for the AIO completion pointed to by result to occur.  If NULL,
+ * wait until a single AIO event has completed and ensure something
+ * has moved before returning. This function can issue new pending aio as
  * result of executing I/O completion or bh callbacks. */
-void qemu_aio_wait(void);
+void qemu_aio_wait(int *result);
 
 /*
  * Runs all currently allowed AIO callbacks of completed requests. Returns 0
