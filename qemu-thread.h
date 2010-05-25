@@ -15,9 +15,21 @@ struct QemuThread {
     pthread_t thread;
 };
 
+struct QemuEvCounter {
+    int ctr;
+#ifdef CONFIG_FUTEX
+    int waiters;
+#else CONFIG_FUTEX
+    QemuMutex lock;
+    QemuCond cond;
+#endif
+};
+
 typedef struct QemuMutex QemuMutex;
 typedef struct QemuCond QemuCond;
 typedef struct QemuThread QemuThread;
+typedef struct QemuEvCounter QemuEvCounter;
+typedef int QemuEvCounterState;
 
 void qemu_mutex_init(QemuMutex *mutex);
 void qemu_mutex_lock(QemuMutex *mutex);
@@ -37,4 +49,14 @@ void qemu_thread_create(QemuThread *thread,
 void qemu_thread_signal(QemuThread *thread, int sig);
 void qemu_thread_self(QemuThread *thread);
 int qemu_thread_equal(QemuThread *thread1, QemuThread *thread2);
+
+void qemu_evcounter_init(QemuEvCounter *evcounter);
+void qemu_evcounter_get(QemuEvCounterState *state, QemuEvCounter *evcounter);
+void qemu_evcounter_wait(QemuEvCounterState *state, QemuEvCounter *evcounter);
+void qemu_evcounter_timedwait(QemuEvCounterState *state,
+                              QemuEvCounter *evcounter, uint64_t msecs);
+void qemu_evcounter_signal(QemuEvCounter *evcounter);
+void qemu_evcounter_put(QemuEvCounter *evcounter);
+
+
 #endif

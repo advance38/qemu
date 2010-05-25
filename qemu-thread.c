@@ -168,3 +168,84 @@ int qemu_thread_equal(QemuThread *thread1, QemuThread *thread2)
    return pthread_equal(thread1->thread, thread2->thread);
 }
 
+#define futex(...)      syscall(__NR_futex, __VA_ARGS__)
+
+void qemu_evcounter_init(QemuEvCounter *evcounter)
+{
+    evcounter->ctr = 0;
+#ifndef CONFIG_FUTEX
+    qemu_mutex_init(&evcounter->lock);
+    qemu_cond_init(&evcounter->cond);
+#endif
+}
+
+void qemu_evcounter_get(QemuEvCounterState *state, QemuEvCounter *evcounter)
+{
+#ifdef CONFIG_FUTEX
+    __sync_fetch_and_add(&evcounter->waiters, 1);
+#endif
+    *state = evcounter->ctr;
+}
+
+void qemu_evcounter_wait(QemuEvCounterState *state, QemuEvCounter *evcounter)
+{
+#ifdef CONFIG_FUTEX
+    if (*state == evcounter->ctr) {
+        futex(&evcounter->ctr, FUTEX_WAIT, *state, NULL);
+    }
+#else
+    qemu_mutex_lock(&evcounter->lock);
+    while (*state == evcounter->ctr) {
+        qemu_cond_wait(&evcounter->cond, &evcounter->lock);
+    }
+    qemu_mutex_unlock(&evcounter->lock);
+#endif
+    *state = evcounter->ctr;
+}
+
+void qemu_evcounter_timedwait(QemuEvCounterState *state,
+			      QemuEvCounter *evcounter, uint64_t msecs)
+{
+#ifdef CONFIG_FUTEX
+    struct timespec ts;
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    timespec_add_ms(&ts, msecs);
+
+    if (*state == evcounter->ctr) {
+        futex(&evcounter->ctr, FUTEX_WAIT, *state, &ts);
+    }
+#else
+    qemu_mutex_lock(&evcounter->lock);
+    while (*state == evcounter->ctr) {
+        qemu_cond_timedwait(&evcounter->cond, &evcounter->lock, msecs);
+    }
+    qemu_mutex_unlock(&evcounter->lock);
+#endif
+    *state = evcounter->ctr;
+}
+
+void qemu_evcounter_signal(QemuEvCounter *evcounter)
+{
+#ifdef CONFIG_FUTEX
+    /* This is written by one thread only, so there's no need to use locking
+       primitives.  However, we rely on the implied memory barrier after
+       it.  */
+    __sync_fetch_and_add(evcounter->ctr, 1);
+    if (evcounter->waiters != 0) {
+        futex(&evcounter->ctr, FUTEX_WAKE, INT_MAX);
+    }
+#else
+    qemu_mutex_lock(&evcounter->lock);
+    evcounter->ctr++;
+    qemu_cond_broadcast(&evcounter->cond);
+    qemu_mutex_unlock(&evcounter->lock);
+#endif
+}
+
+void qemu_evcounter_put(QemuEvCounter *evcounter)
+{
+#ifdef CONFIG_FUTEX
+    __sync_fetch_and_add(&evcounter->waiters, -1);
+#endif
+}
