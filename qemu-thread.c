@@ -181,10 +181,10 @@ void qemu_evcounter_init(QemuEvCounter *evcounter)
 
 void qemu_evcounter_get(QemuEvCounterState *state, QemuEvCounter *evcounter)
 {
+    *state = evcounter->ctr;
 #ifdef CONFIG_FUTEX
     __sync_fetch_and_add(&evcounter->waiters, 1);
 #endif
-    *state = evcounter->ctr;
 }
 
 void qemu_evcounter_wait(QemuEvCounterState *state, QemuEvCounter *evcounter)
@@ -228,10 +228,8 @@ void qemu_evcounter_timedwait(QemuEvCounterState *state,
 void qemu_evcounter_signal(QemuEvCounter *evcounter)
 {
 #ifdef CONFIG_FUTEX
-    /* This is written by one thread only, so there's no need to use locking
-       primitives.  However, we rely on the implied memory barrier after
-       it.  */
-    __sync_fetch_and_add(evcounter->ctr, 1);
+    evcounter->ctr++;
+    __sync_synchronize();
     if (evcounter->waiters != 0) {
         futex(&evcounter->ctr, FUTEX_WAKE, INT_MAX);
     }
