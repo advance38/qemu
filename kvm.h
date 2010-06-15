@@ -195,7 +195,8 @@ int kvm_physical_memory_addr_from_ram(KVMState *s, ram_addr_t ram_addr,
 #endif
 
 #endif
-int kvm_set_ioeventfd_mmio_long(int fd, uint32_t adr, uint32_t val, bool assign);
 
+int kvm_set_ioeventfd_mmio_long(int fd, uint32_t adr, uint32_t val, bool assign);
 int kvm_set_ioeventfd_pio_word(int fd, uint16_t adr, uint16_t val, bool assign);
+int kvm_set_irqfd(int gsi, int fd, bool assigned);
 #endif

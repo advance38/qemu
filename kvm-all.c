@@ -1376,3 +1376,27 @@ int kvm_on_sigbus(int code, void *addr)
 {
     return kvm_arch_on_sigbus(code, addr);
 }
+
+#if defined(KVM_IRQFD)
+int kvm_set_irqfd(int gsi, int fd, bool assigned)
+{
+    struct kvm_irqfd irqfd = {
+        .fd = fd,
+        .gsi = gsi,
+        .flags = assigned ? 0 : KVM_IRQFD_FLAG_DEASSIGN,
+    };
+    int r;
+    if (!kvm_enabled() || !kvm_irqchip_in_kernel())
+        return -ENOSYS;
+
+    r = kvm_vm_ioctl(kvm_state, KVM_IRQFD, &irqfd);
+    if (r < 0)
+        return r;
+    return 0;
+}
+#else
+int kvm_set_irqfd(int gsi, int fd, bool assigned)
+{
+    return -ENOSYS;
+}
+#endif
