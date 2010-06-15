@@ -136,3 +136,9 @@ int kvm_set_ioeventfd_pio_word(int fd, uint16_t addr, uint16_t val, bool assign)
 {
     return -ENOSYS;
 }
+
+int
+kvm_set_irqfd(int gsi, int fd, bool assigned)
+{
+    return -ENOSYS;
+}

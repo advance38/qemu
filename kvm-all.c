@@ -1309,6 +1309,11 @@ int kvm_set_irqfd(int gsi, int fd, bool assigned)
         return r;
     return 0;
 }
+#else
+int kvm_set_irqfd(int gsi, int fd, bool assigned)
+{
+    return -ENOSYS;
+}
 #endif
 
 #undef PAGE_SIZE
