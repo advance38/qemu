@@ -667,11 +667,11 @@ int qemu_init_main_loop(void)
         return ret;
     }
 
-    qemu_cond_init(&qemu_cpu_cond);
-    qemu_cond_init(&qemu_pause_cond);
-    qemu_cond_init(&qemu_work_cond);
-    qemu_cond_init(&qemu_io_proceeded_cond);
     qemu_mutex_init(&qemu_global_mutex);
+    qemu_cond_init(&qemu_cpu_cond, &qemu_global_mutex);
+    qemu_cond_init(&qemu_pause_cond, &qemu_global_mutex);
+    qemu_cond_init(&qemu_work_cond, &qemu_global_mutex);
+    qemu_cond_init(&qemu_io_proceeded_cond, &qemu_global_mutex);
     qemu_mutex_lock(&qemu_global_mutex);
 
     qemu_thread_get_self(&io_thread);
@@ -708,7 +708,7 @@ void run_on_cpu(CPUState *env, void (*func)(void *data), void *data)
     while (!wi.done) {
         CPUState *self_env = cpu_single_env;
 
-        qemu_cond_wait(&qemu_work_cond, &qemu_global_mutex);
+        qemu_cond_wait(&qemu_work_cond);
         cpu_single_env = self_env;
     }
 }
@@ -749,11 +749,11 @@ static void qemu_tcg_wait_io_event(void)
        /* Start accounting real time to the virtual clock if the CPUs
           are idle.  */
         qemu_clock_warp(vm_clock);
-        qemu_cond_wait(tcg_halt_cond, &qemu_global_mutex);
+        qemu_cond_wait(tcg_halt_cond);
     }
 
     while (iothread_requesting_mutex) {
-        qemu_cond_wait(&qemu_io_proceeded_cond, &qemu_global_mutex);
+        qemu_cond_wait(&qemu_io_proceeded_cond);
     }
 
     for (env = first_cpu; env != NULL; env = env->next_cpu) {
@@ -764,7 +764,7 @@ static void qemu_tcg_wait_io_event(void)
 static void qemu_kvm_wait_io_event(CPUState *env)
 {
     while (cpu_thread_is_idle(env)) {
-        qemu_cond_wait(env->halt_cond, &qemu_global_mutex);
+        qemu_cond_wait(env->halt_cond);
     }
 
     qemu_kvm_eat_signals(env);
@@ -822,7 +822,7 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
 
     /* wait for initial kick-off after machine start */
     while (first_cpu->stopped) {
-        qemu_cond_wait(tcg_halt_cond, &qemu_global_mutex);
+        qemu_cond_wait(tcg_halt_cond);
     }
 
     while (1) {
@@ -932,7 +932,7 @@ void pause_all_vcpus(void)
     }
 
     while (!all_vcpus_paused()) {
-        qemu_cond_wait(&qemu_pause_cond, &qemu_global_mutex);
+        qemu_cond_wait(&qemu_pause_cond);
         penv = first_cpu;
         while (penv) {
             qemu_cpu_kick(penv);
@@ -961,11 +961,11 @@ static void qemu_tcg_init_vcpu(void *_env)
     if (!tcg_cpu_thread) {
         env->thread = g_malloc0(sizeof(QemuThread));
         env->halt_cond = g_malloc0(sizeof(QemuCond));
-        qemu_cond_init(env->halt_cond);
+        qemu_cond_init(env->halt_cond, &qemu_global_mutex);
         tcg_halt_cond = env->halt_cond;
         qemu_thread_create(env->thread, qemu_tcg_cpu_thread_fn, env);
         while (env->created == 0) {
-            qemu_cond_wait(&qemu_cpu_cond, &qemu_global_mutex);
+            qemu_cond_wait(&qemu_cpu_cond);
         }
         tcg_cpu_thread = env->thread;
     } else {
@@ -978,10 +978,10 @@ static void qemu_kvm_start_vcpu(CPUState *env)
 {
     env->thread = g_malloc0(sizeof(QemuThread));
     env->halt_cond = g_malloc0(sizeof(QemuCond));
-    qemu_cond_init(env->halt_cond);
+    qemu_cond_init(env->halt_cond, &qemu_global_mutex);
     qemu_thread_create(env->thread, qemu_kvm_cpu_thread_fn, env);
     while (env->created == 0) {
-        qemu_cond_wait(&qemu_cpu_cond, &qemu_global_mutex);
+        qemu_cond_wait(&qemu_cpu_cond);
     }
 }
 
