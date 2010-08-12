@@ -277,7 +277,7 @@ static void qemu_event_read(void *opaque)
     } while ((len == -1 && errno == EINTR) || len == sizeof(buffer));
 }
 
-static int qemu_event_init(void)
+int qemu_event_init(void)
 {
     int err;
     int fds[2];
@@ -414,7 +414,7 @@ static void dummy_event_handler(void *opaque)
 {
 }
 
-static int qemu_event_init(void)
+int qemu_event_init(void)
 {
     qemu_event_handle = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!qemu_event_handle) {
@@ -490,7 +490,7 @@ static sigset_t block_synchronous_signals(void)
 }
 #endif
 
-int qemu_init_main_loop(void)
+void qemu_init_main_loop(void)
 {
 #ifndef _WIN32
     sigset_t blocked_signals;
@@ -505,8 +505,6 @@ int qemu_init_main_loop(void)
 #endif
 
     qemu_init_sigbus();
-
-    return qemu_event_init();
 }
 
 void qemu_main_loop_start(void)
@@ -671,7 +669,7 @@ static sigset_t block_io_signals(void)
     return set;
 }
 
-int qemu_init_main_loop(void)
+void qemu_init_main_loop(void)
 {
     int ret;
     sigset_t blocked_signals;
@@ -685,12 +683,6 @@ int qemu_init_main_loop(void)
         return ret;
     }
 
-    /* Note eventfd must be drained before signalfd handlers run */
-    ret = qemu_event_init();
-    if (ret) {
-        return ret;
-    }
-
     qemu_cond_init(&qemu_cpu_cond);
     qemu_cond_init(&qemu_system_cond);
     qemu_cond_init(&qemu_pause_cond);
@@ -700,8 +692,6 @@ int qemu_init_main_loop(void)
     qemu_mutex_lock(&qemu_global_mutex);
 
     qemu_thread_self(&io_thread);
-
-    return 0;
 }
 
 void qemu_main_loop_start(void)

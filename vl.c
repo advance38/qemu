@@ -1944,6 +1944,11 @@ int main(int argc, char **argv, char **envp)
     atexit(qemu_run_exit_notifiers);
     error_set_progname(argv[0]);
 
+    if (qemu_event_init()) {
+        fprintf(stderr, "qemu_event_init failed\n");
+        exit(1);
+    }
+
     init_clocks();
 
     qemu_cache_utils_init(envp);
@@ -2875,10 +2880,7 @@ int main(int argc, char **argv, char **envp)
         }
     }
 
-    if (qemu_init_main_loop()) {
-        fprintf(stderr, "qemu_init_main_loop failed\n");
-        exit(1);
-    }
+    qemu_init_main_loop();
     linux_boot = (kernel_filename != NULL);
 
     if (!linux_boot && *kernel_cmdline != '\0') {
