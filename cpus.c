@@ -184,7 +184,7 @@ static void qemu_event_read(void *opaque)
     } while ((len == -1 && errno == EINTR) || len == sizeof(buffer));
 }
 
-static int qemu_event_init(void)
+int qemu_event_init(void)
 {
     int err;
     int fds[2];
@@ -241,11 +241,9 @@ static void qemu_event_increment(void)
 #endif
 
 #ifndef CONFIG_IOTHREAD
-int qemu_init_main_loop(void)
+void qemu_init_main_loop(void)
 {
     cpu_set_debug_excp_handler(cpu_debug_handler);
-
-    return qemu_event_init();
 }
 
 void qemu_main_loop_start(void)
@@ -338,15 +336,9 @@ static void tcg_init_ipi(void);
 static void kvm_init_ipi(CPUState *env);
 static void unblock_io_signals(void);
 
-int qemu_init_main_loop(void)
+void qemu_init_main_loop(void)
 {
-    int ret;
-
     cpu_set_debug_excp_handler(cpu_debug_handler);
-
-    ret = qemu_event_init();
-    if (ret)
-        return ret;
 
     qemu_cond_init(&qemu_pause_cond);
     qemu_cond_init(&qemu_system_cond);
@@ -356,8 +348,6 @@ int qemu_init_main_loop(void)
 
     unblock_io_signals();
     qemu_thread_self(&io_thread);
-
-    return 0;
 }
 
 void qemu_main_loop_start(void)
