@@ -4,6 +4,7 @@
 #include <inttypes.h>
 
 typedef struct QemuMutex QemuMutex;
+typedef struct QemuRWMutex QemuRWMutex;
 typedef struct QemuCond QemuCond;
 typedef struct QemuThread QemuThread;
 
@@ -18,6 +19,11 @@ void qemu_mutex_destroy(QemuMutex *mutex);
 void qemu_mutex_lock(QemuMutex *mutex);
 int qemu_mutex_trylock(QemuMutex *mutex);
 void qemu_mutex_unlock(QemuMutex *mutex);
+
+void qemu_rwmutex_init(QemuRWMutex *mutex);
+void qemu_rwmutex_rdlock(QemuRWMutex *mutex);
+void qemu_rwmutex_wrlock(QemuRWMutex *mutex);
+void qemu_rwmutex_unlock(QemuRWMutex *mutex);
 
 void qemu_cond_init(QemuCond *cond, QemuMutex *mutex);
 void qemu_cond_destroy(QemuCond *cond);
