@@ -302,8 +302,10 @@ int ram_save_live(Monitor *mon, QEMUFile *f, int stage, void *opaque)
     int pages_read = 0;
     int ret;
 
+    qemu_mutex_lock_iothread();
     if (stage < 0) {
         memory_global_dirty_log_stop();
+        qemu_mutex_unlock_iothread();
         return 0;
     }
 
@@ -325,6 +327,7 @@ int ram_save_live(Monitor *mon, QEMUFile *f, int stage, void *opaque)
 
         memory_global_dirty_log_start();
     }
+    qemu_mutex_unlock_iothread();
 
     if (stage == 1 || ram_list.version != last_version) {
         int64_t ram_size = last_ram_offset();

@@ -91,8 +91,6 @@ int tcp_start_outgoing_migration(MigrationState *s, const char *host_port)
         return s->fd;
     }
 
-    socket_set_nonblock(s->fd);
-
     do {
         ret = qemu_connect(s->fd, (struct sockaddr *)&addr, sizeof(addr));
         if (ret == -EINPROGRESS || ret == -EWOULDBLOCK) {

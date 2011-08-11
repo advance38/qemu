@@ -25,9 +25,13 @@ struct MigrationState
 {
     int64_t bandwidth_limit;
     QEMUFile *file;
+    QEMUBH *bh;
     int fd;
     Monitor *mon;
     int state;
+    int old_vm_running;
+    int begin;
+    int complete;
     int (*get_error)(MigrationState *s);
     int (*close)(MigrationState *s);
     void *opaque;
