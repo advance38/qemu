@@ -99,8 +99,6 @@ int tcp_start_outgoing_migration(MigrationState *s, const char *host_port)
         return -socket_error();
     }
 
-    socket_set_nonblock(s->fd);
-
     do {
         ret = connect(s->fd, (struct sockaddr *)&addr, sizeof(addr));
         if (ret == -1) {

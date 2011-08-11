@@ -17,6 +17,7 @@
 #include "qdict.h"
 #include "qemu-common.h"
 #include "notify.h"
+#include "main-loop.h"
 #include "error.h"
 
 typedef struct MigrationState MigrationState;
@@ -25,8 +26,12 @@ struct MigrationState
 {
     int64_t bandwidth_limit;
     QEMUFile *file;
+    QEMUBH *bh;
     int fd;
     int state;
+    int old_vm_running;
+    int begin;
+    int complete;
     int (*get_error)(MigrationState *s);
     int (*close)(MigrationState *s);
     int (*write)(MigrationState *s, const void *buff, size_t size);
