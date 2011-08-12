@@ -482,8 +482,9 @@ typedef struct RAMBlock {
     ram_addr_t offset;
     ram_addr_t length;
     uint32_t flags;
-    char idstr[256];
+    QLIST_ENTRY(RAMBlock) next_mru;
     QLIST_ENTRY(RAMBlock) next;
+    char idstr[256];
 #if defined(__linux__) && !defined(TARGET_S390X)
     int fd;
 #endif
@@ -491,6 +492,7 @@ typedef struct RAMBlock {
 
 typedef struct RAMList {
     uint8_t *phys_dirty;
+    QLIST_HEAD(, RAMBlock) blocks_mru;
     QLIST_HEAD(, RAMBlock) blocks;
 } RAMList;
 extern RAMList ram_list;
