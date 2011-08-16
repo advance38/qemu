@@ -2076,6 +2076,10 @@ void cpu_physical_memory_reset_dirty(ram_addr_t start, ram_addr_t end,
         abort();
     }
 
+    if (kvm_enabled()) {
+        return;
+    }
+
     for(env = first_cpu; env != NULL; env = env->next_cpu) {
         int mmu_idx;
         for (mmu_idx = 0; mmu_idx < NB_MMU_MODES; mmu_idx++) {
@@ -2859,7 +2863,7 @@ static ram_addr_t find_ram_offset(ram_addr_t size)
     return offset;
 }
 
-static ram_addr_t last_ram_offset(void)
+ram_addr_t last_ram_offset(void)
 {
     RAMBlock *block;
     ram_addr_t last = 0;
