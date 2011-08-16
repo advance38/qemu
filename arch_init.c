@@ -130,6 +130,43 @@ static int is_dup_page(uint8_t *page)
 static RAMBlock *last_block;
 static ram_addr_t last_offset;
 static uint32_t last_version;
+static uint8_t *migration_bitmap;
+
+static inline int migration_bitmap_get_dirty(MemoryRegion *mr, ram_addr_t addr)
+{
+    int ret;
+    addr += mr->ram_addr;
+    ret = migration_bitmap[addr >> TARGET_PAGE_BITS];
+    migration_bitmap[addr >> TARGET_PAGE_BITS] = 0;
+    return ret;
+}
+
+static inline void migration_bitmap_set_dirty(MemoryRegion *mr,
+                                              ram_addr_t offset, int length)
+{
+    ram_addr_t start;
+    int len;
+    uint8_t *p;
+
+    start = mr->ram_addr + offset;
+    len = length >> TARGET_PAGE_BITS;
+    p = migration_bitmap + (start >> TARGET_PAGE_BITS);
+    memset(p, 0xff, len);
+}
+
+static void sync_migration_bitmap(MemoryRegion *mr, ram_addr_t length)
+{
+    ram_addr_t addr;
+
+    for (addr = 0; addr < length; addr += TARGET_PAGE_SIZE) {
+        if (memory_region_get_dirty(mr, addr, TARGET_PAGE_SIZE,
+                                    DIRTY_MEMORY_MIGRATION)) {
+            migration_bitmap_set_dirty(mr, addr, TARGET_PAGE_SIZE);
+        }
+    }
+    memory_region_reset_dirty(mr, addr, length, DIRTY_MEMORY_MIGRATION);
+
+}
 
 static int ram_save_block(QEMUFile *f)
 {
@@ -143,13 +180,9 @@ static int ram_save_block(QEMUFile *f)
 
     do {
         mr = block->mr;
-        if (memory_region_get_dirty(mr, offset, TARGET_PAGE_SIZE,
-                                    DIRTY_MEMORY_MIGRATION)) {
+        if (migration_bitmap_get_dirty(mr, offset)) {
             uint8_t *p;
             int cont = (block == last_block) ? RAM_SAVE_FLAG_CONTINUE : 0;
-
-            memory_region_reset_dirty(mr, offset, TARGET_PAGE_SIZE,
-                                      DIRTY_MEMORY_MIGRATION);
 
             p = memory_region_get_ram_ptr(mr) + offset;
 
@@ -201,8 +234,7 @@ static ram_addr_t ram_save_remaining(void)
     QLIST_FOREACH(block, &ram_list.blocks, next) {
         ram_addr_t addr;
         for (addr = 0; addr < block->length; addr += TARGET_PAGE_SIZE) {
-            if (memory_region_get_dirty(block->mr, addr, TARGET_PAGE_SIZE,
-                                        DIRTY_MEMORY_MIGRATION)) {
+            if (migration_bitmap_get_dirty(block->mr, addr)) {
                 count++;
             }
         }
@@ -264,7 +296,6 @@ static void sort_ram_list(void)
 int ram_save_live(QEMUFile *f, int stage, void *opaque)
 {
     RAMBlock *block;
-    ram_addr_t addr;
     uint64_t bytes_transferred_last;
     double bwidth = 0;
     uint64_t expected_time = 0;
@@ -278,23 +309,25 @@ int ram_save_live(QEMUFile *f, int stage, void *opaque)
     memory_global_sync_dirty_bitmap(get_system_memory());
 
     qemu_mutex_lock_ramlist();
+    /* TODO: move to memory.c and use FOR_EACH_FLAT_RANGE?  */
+    QLIST_FOREACH(block, &ram_list.blocks, next) {
+        sync_migration_bitmap(block->mr, block->length);
+    }
+
     if (stage == 1) {
         bytes_transferred = 0;
 
         /* Make sure all dirty bits are set */
         QLIST_FOREACH(block, &ram_list.blocks, next) {
-            for (addr = 0; addr < block->length; addr += TARGET_PAGE_SIZE) {
-                if (!memory_region_get_dirty(block->mr, addr, TARGET_PAGE_SIZE,
-                                             DIRTY_MEMORY_MIGRATION)) {
-                    memory_region_set_dirty(block->mr, addr, TARGET_PAGE_SIZE);
-                }
-            }
+            migration_bitmap_set_dirty(block->mr, 0, block->length);
         }
 
         memory_global_dirty_log_start();
     }
 
     if (stage == 1 || ram_list.version != last_version) {
+        int64_t ram_size = last_ram_offset();
+
         /* last_block is not valid, restart from the beginning.  */
         last_block = NULL;
         last_offset = 0;
@@ -308,6 +341,11 @@ int ram_save_live(QEMUFile *f, int stage, void *opaque)
             qemu_put_buffer(f, (uint8_t *)block->idstr, strlen(block->idstr));
             qemu_put_be64(f, block->length);
         }
+
+        migration_bitmap = g_realloc(ram_list.phys_dirty,
+                                     ram_size >> TARGET_PAGE_BITS);
+
+        memset(migration_bitmap, 0xff, ram_size >> TARGET_PAGE_BITS);
     }
 
     bytes_transferred_last = bytes_transferred;
@@ -345,6 +383,8 @@ int ram_save_live(QEMUFile *f, int stage, void *opaque)
             bytes_transferred += bytes_sent;
         }
         memory_global_dirty_log_stop();
+        g_free(migration_bitmap);
+        migration_bitmap = NULL;
     }
 
     qemu_mutex_unlock_ramlist();

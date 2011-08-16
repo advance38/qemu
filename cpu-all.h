@@ -534,6 +534,7 @@ void dump_exec_info(FILE *f, fprintf_function cpu_fprintf);
 
 void qemu_mutex_lock_ramlist(void);
 void qemu_mutex_unlock_ramlist(void);
+ram_addr_t last_ram_offset(void);
 
 int cpu_memory_rw_debug(CPUArchState *env, target_ulong addr,
                         uint8_t *buf, int len, int is_write);
