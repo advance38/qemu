@@ -313,6 +313,12 @@ void qemu_thread_exit(void *arg)
     ExitThread(0);
 }
 
+void *qemu_thread_join(QemuThread *thread)
+{
+    WaitForSingleObject(thread->thread, INFINITE);
+    return thread->ret;
+}
+
 static inline void qemu_thread_init(void)
 {
     if (qemu_thread_tls_index == TLS_OUT_OF_INDEXES) {

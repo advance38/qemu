@@ -29,7 +29,7 @@ void qemu_cond_init(QemuCond *cond, QemuMutex *mutex);
 void qemu_cond_destroy(QemuCond *cond);
 void qemu_cond_signal(QemuCond *cond);
 void qemu_cond_broadcast(QemuCond *cond);
-void qemu_cond_wait(QemuCond *cond);
+void qemu_cond_wait(QemuCond *cond, QemuMutex *mutex);
 
 void qemu_thread_create(QemuThread *thread,
                        void *(*start_routine)(void*),
@@ -37,5 +37,6 @@ void qemu_thread_create(QemuThread *thread,
 void qemu_thread_get_self(QemuThread *thread);
 int qemu_thread_is_self(QemuThread *thread);
 void qemu_thread_exit(void *retval);
+void *qemu_thread_join(QemuThread *thread);
 
 #endif

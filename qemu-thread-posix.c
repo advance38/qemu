@@ -177,6 +177,18 @@ void qemu_cond_wait(QemuCond *cond)
         error_exit(err, __func__);
 }
 
+void *qemu_thread_join(QemuThread *thread)
+{
+    int err;
+    void *ret;
+
+    err = pthread_join(thread->thread, &ret);
+    if (err) {
+        error_exit(err, __func__);
+    }
+    return ret;
+}
+
 void qemu_thread_create(QemuThread *thread,
                        void *(*start_routine)(void*),
                        void *arg)
