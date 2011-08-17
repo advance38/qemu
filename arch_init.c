@@ -278,6 +278,7 @@ int ram_save_live(Monitor *mon, QEMUFile *f, int stage, void *opaque)
 
     memory_global_sync_dirty_bitmap(get_system_memory());
 
+    qemu_mutex_lock_ramlist();
     if (stage == 1) {
         bytes_transferred = 0;
 
@@ -351,6 +352,7 @@ int ram_save_live(Monitor *mon, QEMUFile *f, int stage, void *opaque)
         memory_global_dirty_log_stop();
     }
 
+    qemu_mutex_unlock_ramlist();
     qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
 
     expected_time = ram_save_remaining() * TARGET_PAGE_SIZE / bwidth;

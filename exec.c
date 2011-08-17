@@ -656,6 +656,7 @@ bool tcg_enabled(void)
 
 void cpu_exec_init_all(void)
 {
+    qemu_mutex_init(&ram_list.mutex);
 #if !defined(CONFIG_USER_ONLY)
     memory_map_init();
     io_mem_init();
@@ -2745,6 +2746,16 @@ static long gethugepagesize(const char *path)
     return fs.f_bsize;
 }
 
+void qemu_mutex_lock_ramlist(void)
+{
+    qemu_mutex_lock(&ram_list.mutex);
+}
+
+void qemu_mutex_unlock_ramlist(void)
+{
+    qemu_mutex_unlock(&ram_list.mutex);
+}
+
 static void *file_ram_alloc(RAMBlock *block,
                             ram_addr_t memory,
                             const char *path)
@@ -2882,6 +2893,7 @@ void qemu_ram_set_idstr(ram_addr_t addr, const char *name, DeviceState *dev)
     }
     pstrcat(new_block->idstr, sizeof(new_block->idstr), name);
 
+    qemu_mutex_lock_ramlist();
     QLIST_FOREACH(block, &ram_list.blocks, next) {
         if (block != new_block && !strcmp(block->idstr, new_block->idstr)) {
             fprintf(stderr, "RAMBlock \"%s\" already registered, abort!\n",
@@ -2946,6 +2958,7 @@ ram_addr_t qemu_ram_alloc_from_ptr(ram_addr_t size, void *host,
     QLIST_INSERT_HEAD(&ram_list.blocks_mru, new_block, next_mru);
 
     ram_list.version++;
+    qemu_mutex_unlock_ramlist();
 
     ram_list.phys_dirty = g_realloc(ram_list.phys_dirty,
                                        last_ram_offset() >> TARGET_PAGE_BITS);
@@ -2967,21 +2980,24 @@ void qemu_ram_free_from_ptr(ram_addr_t addr)
 {
     RAMBlock *block;
 
+    qemu_mutex_lock_ramlist();
     QLIST_FOREACH(block, &ram_list.blocks, next) {
         if (addr == block->offset) {
             QLIST_REMOVE(block, next);
             QLIST_REMOVE(block, next_mru);
             ram_list.version++;
             g_free(block);
-            return;
+            break;
         }
     }
+    qemu_mutex_unlock_ramlist();
 }
 
 void qemu_ram_free(ram_addr_t addr)
 {
     RAMBlock *block;
 
+    qemu_mutex_lock_ramlist();
     QLIST_FOREACH(block, &ram_list.blocks, next) {
         if (addr == block->offset) {
             QLIST_REMOVE(block, next);
@@ -3012,9 +3028,10 @@ void qemu_ram_free(ram_addr_t addr)
 #endif
             }
             g_free(block);
-            return;
+            break;
         }
     }
+    qemu_mutex_unlock_ramlist();
 
 }
 
