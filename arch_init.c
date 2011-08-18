@@ -129,6 +129,7 @@ static int is_dup_page(uint8_t *page)
 
 static RAMBlock *last_block;
 static ram_addr_t last_offset;
+static uint32_t last_version;
 
 static int ram_save_block(QEMUFile *f)
 {
@@ -262,6 +263,7 @@ static void sort_ram_list(void)
 
 int ram_save_live(QEMUFile *f, int stage, void *opaque)
 {
+    RAMBlock *block;
     ram_addr_t addr;
     uint64_t bytes_transferred_last;
     double bwidth = 0;
@@ -276,11 +278,7 @@ int ram_save_live(QEMUFile *f, int stage, void *opaque)
     memory_global_sync_dirty_bitmap(get_system_memory());
 
     if (stage == 1) {
-        RAMBlock *block;
         bytes_transferred = 0;
-        last_block = NULL;
-        last_offset = 0;
-        sort_ram_list();
 
         /* Make sure all dirty bits are set */
         QLIST_FOREACH(block, &ram_list.blocks, next) {
@@ -293,7 +291,15 @@ int ram_save_live(QEMUFile *f, int stage, void *opaque)
         }
 
         memory_global_dirty_log_start();
+    }
 
+    if (stage == 1 || ram_list.version != last_version) {
+        /* last_block is not valid, restart from the beginning.  */
+        last_block = NULL;
+        last_offset = 0;
+        last_version = ram_list.version;
+
+        sort_ram_list();
         qemu_put_be64(f, ram_bytes_total() | RAM_SAVE_FLAG_MEM_SIZE);
 
         QLIST_FOREACH(block, &ram_list.blocks, next) {
