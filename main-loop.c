@@ -238,7 +238,7 @@ static void qemu_fd_prepare(int fd, bool rd, bool wr, bool pri)
     if (pri) {
         flags |= FD_OOB;
     }
-    WSAEventSelect(fd, qemu_socket_handle, flags);
+    WSAEventSelect(_get_osfhandle(fd), qemu_socket_handle, flags);
 #endif
     if (rd) {
         FD_SET(fd, &rfds);

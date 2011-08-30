@@ -76,13 +76,13 @@ void qemu_vfree(void *ptr)
 void socket_set_block(int fd)
 {
     unsigned long opt = 0;
-    ioctlsocket(fd, FIONBIO, &opt);
+    ioctlsocket(_get_osfhandle(fd), FIONBIO, &opt);
 }
 
 void socket_set_nonblock(int fd)
 {
     unsigned long opt = 1;
-    ioctlsocket(fd, FIONBIO, &opt);
+    ioctlsocket(_get_osfhandle(fd), FIONBIO, &opt);
 }
 
 int inet_aton(const char *cp, struct in_addr *ia)
@@ -126,17 +126,18 @@ int qemu_get_thread_id(void)
 
 int qemu_close_socket(int fd)
 {
-    int rc = 0;
-    rc = closesocket(fd);
+    SOCKET s = _get_osfhandle(fd);
+    int rc = closesocket(s);
     if (rc < 0) {
         rc = -socket_error();
     }
+    close(fd);
     return rc;
 }
 
 int qemu_listen(int fd, int backlog)
 {
-    int rc = listen(fd, backlog);
+    int rc = listen(_get_osfhandle(fd), backlog);
     if (rc < 0) {
         rc = -socket_error();
     }
@@ -145,7 +146,7 @@ int qemu_listen(int fd, int backlog)
 
 int qemu_bind(int fd, const struct sockaddr *addr, socklen_t addrlen)
 {
-    int rc = bind(fd, addr, addrlen);
+    int rc = bind(_get_osfhandle(fd), addr, addrlen);
     if (rc < 0) {
         rc = -socket_error();
     }
@@ -154,7 +155,7 @@ int qemu_bind(int fd, const struct sockaddr *addr, socklen_t addrlen)
 
 int qemu_connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
 {
-    int rc = connect(fd, addr, addrlen);
+    int rc = connect(_get_osfhandle(fd), addr, addrlen);
     if (rc < 0) {
         rc = -socket_error();
     }
@@ -163,7 +164,7 @@ int qemu_connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
 
 int qemu_getsockopt(int fd, int level, int opt, void *val, socklen_t *len)
 {
-    int rc = getsockopt(fd, level, opt, val, len);
+    int rc = getsockopt(_get_osfhandle(fd), level, opt, val, len);
     if (rc < 0) {
         rc = -socket_error();
     }
@@ -172,19 +173,17 @@ int qemu_getsockopt(int fd, int level, int opt, void *val, socklen_t *len)
 
 int qemu_accept(int s, struct sockaddr *addr, socklen_t *addrlen)
 {
-    int fd;
-
-    fd = accept(s, addr, addrlen);
+    int fd = accept(_get_osfhandle(s), addr, addrlen);
     if (fd < 0) {
         return -socket_error();
     }
     qemu_set_cloexec(fd);
-    return fd;
+    return _open_osfhandle(fd, O_RDWR | O_BINARY);
 }
 
 int qemu_setsockopt(int fd, int level, int opt, const void *val, socklen_t len)
 {
-    int rc = setsockopt(fd, level, opt, val, len);
+    int rc = setsockopt(_get_osfhandle(fd), level, opt, val, len);
     if (rc < 0) {
         rc = -socket_error();
     }
@@ -203,15 +202,62 @@ int qemu_socket(int domain, int type, int protocol)
         return -socket_error();
     }
     qemu_set_cloexec(fd);
-    return fd;
+    return _open_osfhandle(fd, O_RDWR | O_BINARY);
+}
+
+static void fdset_to_sdset(fd_set *fdset, fd_set *sdset1, fd_set *sdset2)
+{
+    int i;
+    sdset1->fd_count = sdset1->fd_count;
+    sdset2->fd_count = sdset2->fd_count;
+    for (i = 0; i < fdset->fd_count; i++) {
+        SOCKET sd = _get_osfhandle(fdset->fd_array[i]);
+        sdset1->fd_array[i] = sdset2->fd_array[i] = sd;
+    }
+}
+
+static void sdset_to_fdset(fd_set *fdset, fd_set *sdset, fd_set *orig_sdset)
+{
+    int i, j;
+    for (i = j = 0; i < orig_sdset->fd_count; i++) {
+        if (orig_sdset->fd_array[i] == sdset->fd_array[j]) {
+            fdset->fd_array[j++] = fdset->fd_array[i];
+        }
+    }
+    fdset->fd_count = j;
 }
 
 int qemu_select(int nfds, fd_set *readfds, fd_set *writefds,
                 fd_set *exceptfds, struct timeval *timeout)
 {
-    int rc = select(nfds, readfds, writefds, exceptfds, timeout);
+    fd_set readsds, writesds, exceptsds;
+    fd_set orig_readsds, orig_writesds, orig_exceptsds;
+    fd_set *p_readsds = NULL, *p_writesds = NULL, *p_exceptsds = NULL;
+    int rc;
+    if (readfds) {
+        p_readsds = &readsds;
+        fdset_to_sdset(readfds, &readsds, &orig_readsds);
+    }
+    if (writefds) {
+        p_writesds = &writesds;
+        fdset_to_sdset(writefds, &writesds, &orig_writesds);
+    }
+    if (exceptfds) {
+        p_exceptsds = &exceptsds;
+        fdset_to_sdset(exceptfds, &exceptsds, &orig_exceptsds);
+    }
+    rc = select(nfds, p_readsds, p_writesds, p_exceptsds, timeout);
     if (rc < 0) {
-        rc = -socket_error();
+        return -socket_error();
+    }
+    if (readfds) {
+        sdset_to_fdset(readfds, &readsds, &orig_readsds);
+    }
+    if (writefds) {
+        sdset_to_fdset(writefds, &writesds, &orig_writesds);
+    }
+    if (exceptfds) {
+        sdset_to_fdset(exceptfds, &exceptsds, &orig_exceptsds);
     }
     return rc;
 }
