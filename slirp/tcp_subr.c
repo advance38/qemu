@@ -329,7 +329,7 @@ int tcp_fconnect(struct socket *so)
     int opt, s=so->s;
     struct sockaddr_in addr;
 
-    fd_nonblock(s);
+    socket_set_nonblock(s);
     opt = 1;
     qemu_setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt ));
     opt = 1;
@@ -417,7 +417,7 @@ tcp_connect(struct socket *inso)
 		tcp_close(sototcpcb(so)); /* This will sofree() as well */
 		return;
 	}
-	fd_nonblock(s);
+	socket_set_nonblock(s);
 	opt = 1;
 	qemu_setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(int));
 	opt = 1;
