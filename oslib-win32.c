@@ -205,3 +205,13 @@ int qemu_socket(int domain, int type, int protocol)
     qemu_set_cloexec(fd);
     return fd;
 }
+
+int qemu_select(int nfds, fd_set *readfds, fd_set *writefds,
+                fd_set *exceptfds, struct timeval *timeout)
+{
+    int rc = select(nfds, readfds, writefds, exceptfds, timeout);
+    if (rc < 0) {
+        rc = -socket_error();
+    }
+    return rc;
+}

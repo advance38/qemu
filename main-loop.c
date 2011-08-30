@@ -326,7 +326,7 @@ static int os_host_main_loop_wait(int timeout)
 
     tv.tv_sec = timeout / 1000;
     tv.tv_usec = (timeout % 1000) * 1000;
-    ret = select(nfds + 1, &rfds, &wfds, &xfds, &tv);
+    ret = qemu_select(nfds + 1, &rfds, &wfds, &xfds, &tv);
 
     if (timeout > 0) {
         qemu_mutex_lock_iothread();
@@ -435,7 +435,7 @@ static int os_host_main_loop_wait(int timeout)
 
     ResetEvent(qemu_socket_handle);
     if (nfds >= 0) {
-        ret = select(nfds + 1, &rfds, &wfds, &xfds, &tv0);
+        ret = qemu_select(nfds + 1, &rfds, &wfds, &xfds, &tv0);
         if (ret != 0) {
             timeout = 0;
         }
