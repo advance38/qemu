@@ -400,7 +400,7 @@ tcp_connect(struct socket *inso)
 	} else {
 		if ((so = socreate(slirp)) == NULL) {
 			/* If it failed, get rid of the pending connection */
-			qemu_close_socket(accept(inso->s,(struct sockaddr *)&addr,&addrlen));
+			qemu_close_socket(qemu_accept(inso->s,(struct sockaddr *)&addr,&addrlen));
 			return;
 		}
 		if (tcp_attach(so) < 0) {
@@ -413,7 +413,7 @@ tcp_connect(struct socket *inso)
 
 	(void) tcp_mss(sototcpcb(so), 0);
 
-	if ((s = accept(inso->s,(struct sockaddr *)&addr,&addrlen)) < 0) {
+	if ((s = qemu_accept(inso->s,(struct sockaddr *)&addr,&addrlen)) < 0) {
 		tcp_close(sototcpcb(so)); /* This will sofree() as well */
 		return;
 	}
