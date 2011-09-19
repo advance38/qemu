@@ -114,92 +114,21 @@ static bool qemu_aio_pending(void)
 
 void qemu_aio_flush(void)
 {
+    int ret;
+    bool first = true;
     do {
-        qemu_aio_wait();
-    } while (qemu_bh_poll() || qemu_aio_pending());
+        ret = main_loop_wait(first);
+        first = false;
+    } while (ret || qemu_aio_pending());
 }
 
 void qemu_aio_wait(void)
 {
-    int ret;
-
-    /*
-     * If there are callbacks left that have been queued, we need to call then.
-     * Return afterwards to avoid waiting needlessly in select().  If nothing
-     * interesting happened, qemu_aio_wait will be called again soon.
+    /* If there aren't pending AIO operations, no need to do anything.
+     * Otherwise, if there are no AIO requests, qemu_aio_wait() would
+     * wait indefinitely.
      */
-    if (qemu_bh_poll())
-        return;
-
-    do {
-        AioHandler *node;
-        fd_set rdfds, wrfds;
-        int max_fd = -1;
-
-        /* If there aren't pending AIO operations, no need to do anything.
-         * Otherwise, if there are no AIO requests, qemu_aio_wait() would
-         * wait indefinitely.
-         */
-        if (!qemu_aio_pending()) {
-            break;
-        }
-
-        walking_handlers = 1;
-
-        FD_ZERO(&rdfds);
-        FD_ZERO(&wrfds);
-
-        /* fill fd sets */
-        QLIST_FOREACH(node, &aio_handlers, node) {
-            if (!node->deleted && node->io_read) {
-                FD_SET(node->fd, &rdfds);
-                max_fd = MAX(max_fd, node->fd + 1);
-            }
-            if (!node->deleted && node->io_write) {
-                FD_SET(node->fd, &wrfds);
-                max_fd = MAX(max_fd, node->fd + 1);
-            }
-        }
-
-        walking_handlers = 0;
-        assert(max_fd > -1);
-
-        /* wait until next event */
-        ret = select(max_fd, &rdfds, &wrfds, NULL, NULL);
-        if (ret == -1 && errno == EINTR)
-            continue;
-
-        /* if we have any readable fds, dispatch event */
-        if (ret > 0) {
-            walking_handlers = 1;
-
-            /* we have to walk very carefully in case
-             * qemu_aio_set_fd_handler is called while we're walking */
-            node = QLIST_FIRST(&aio_handlers);
-            while (node) {
-                AioHandler *tmp;
-
-                if (!node->deleted &&
-                    FD_ISSET(node->fd, &rdfds) &&
-                    node->io_read) {
-                    node->io_read(node->opaque);
-                }
-                if (!node->deleted &&
-                    FD_ISSET(node->fd, &wrfds) &&
-                    node->io_write) {
-                    node->io_write(node->opaque);
-                }
-
-                tmp = node;
-                node = QLIST_NEXT(node, node);
-
-                if (tmp->deleted) {
-                    QLIST_REMOVE(tmp, node);
-                    g_free(tmp);
-                }
-            }
-
-            walking_handlers = 0;
-        }
-    } while (ret == 0);
+    if (qemu_aio_pending()) {
+        main_loop_wait(false);
+    }
 }

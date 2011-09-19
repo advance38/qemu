@@ -31,8 +31,9 @@ void qemu_aio_flush(void);
 void qemu_aio_wait(void);
 
 /* Register a file descriptor and associated callbacks.  Behaves very similarly
- * to qemu_set_fd_handler2.  Unlike qemu_set_fd_handler2, these callbacks will
- * be invoked when using either qemu_aio_wait() or qemu_aio_flush().
+ * to qemu_set_fd_handler2.  However, it also register an io_flush callback,
+ * which tells qemu_aio_wait() and qemu_aio_flush() to actually wait rather
+ * than just exiting.
  *
  * Code that invokes AIO completion functions should rely on this function
  * instead of qemu_set_fd_handler[2].
