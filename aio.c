@@ -26,8 +26,6 @@ static QLIST_HEAD(, AioHandler) aio_handlers;
 struct AioHandler
 {
     int fd;
-    IOHandler *io_read;
-    IOHandler *io_write;
     AioFlushHandler *io_flush;
     void *opaque;
     QLIST_ENTRY(AioHandler) node;
@@ -57,7 +55,7 @@ int qemu_aio_set_fd_handler(int fd,
     node = find_aio_handler(fd);
 
     /* Are we deleting the fd handler? */
-    if (!io_read && !io_write) {
+    if (!io_flush) {
         if (node) {
             QLIST_REMOVE(node, node);
             g_free(node);
@@ -70,8 +68,6 @@ int qemu_aio_set_fd_handler(int fd,
             QLIST_INSERT_HEAD(&aio_handlers, node, node);
         }
         /* Update handler with latest information */
-        node->io_read = io_read;
-        node->io_write = io_write;
         node->io_flush = io_flush;
         node->opaque = opaque;
     }
@@ -89,7 +85,7 @@ static bool qemu_aio_pending(void)
         if (node->deleted) {
             continue;
         }
-        if (node->io_flush && node->io_flush(node->opaque)) {
+        if (node->io_flush(node->opaque)) {
             return 1;
         }
     }
