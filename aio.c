@@ -23,19 +23,12 @@ typedef struct AioHandler AioHandler;
 /* The list of registered AIO handlers */
 static QLIST_HEAD(, AioHandler) aio_handlers;
 
-/* This is a simple lock used to protect the aio_handlers list.  Specifically,
- * it's used to ensure that no callbacks are removed while we're walking and
- * dispatching callbacks.
- */
-static int walking_handlers;
-
 struct AioHandler
 {
     int fd;
     IOHandler *io_read;
     IOHandler *io_write;
     AioFlushHandler *io_flush;
-    int deleted;
     void *opaque;
     QLIST_ENTRY(AioHandler) node;
 };
@@ -45,9 +38,9 @@ static AioHandler *find_aio_handler(int fd)
     AioHandler *node;
 
     QLIST_FOREACH(node, &aio_handlers, node) {
-        if (node->fd == fd)
-            if (!node->deleted)
-                return node;
+        if (node->fd == fd) {
+            return node;
+	}
     }
 
     return NULL;
@@ -66,17 +59,8 @@ int qemu_aio_set_fd_handler(int fd,
     /* Are we deleting the fd handler? */
     if (!io_read && !io_write) {
         if (node) {
-            /* If the lock is held, just mark the node as deleted */
-            if (walking_handlers)
-                node->deleted = 1;
-            else {
-                /* Otherwise, delete it for real.  We can't just mark it as
-                 * deleted because deleted nodes are only cleaned up after
-                 * releasing the walking_handlers lock.
-                 */
-                QLIST_REMOVE(node, node);
-                g_free(node);
-            }
+            QLIST_REMOVE(node, node);
+            g_free(node);
         }
     } else {
         if (node == NULL) {
