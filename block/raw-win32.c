@@ -33,7 +33,7 @@
 #define FTYPE_HARDDISK 2
 
 typedef struct BDRVRawState {
-    HANDLE hfile;
+    int fd;
     int type;
     char drive_path[16]; /* format: "d:\" */
 } BDRVRawState;
@@ -82,6 +82,7 @@ static int raw_open(BlockDriverState *bs, const char *filename, int flags)
     BDRVRawState *s = bs->opaque;
     int access_flags;
     DWORD overlapped;
+    HANDLE hfile;
 
     s->type = FTYPE_FILE;
 
@@ -96,91 +97,62 @@ static int raw_open(BlockDriverState *bs, const char *filename, int flags)
         overlapped |= FILE_FLAG_NO_BUFFERING;
     if (!(flags & BDRV_O_CACHE_WB))
         overlapped |= FILE_FLAG_WRITE_THROUGH;
-    s->hfile = CreateFile(filename, access_flags,
+    hfile = CreateFile(filename, access_flags,
                           FILE_SHARE_READ, NULL,
                           OPEN_EXISTING, overlapped, NULL);
-    if (s->hfile == INVALID_HANDLE_VALUE) {
+    if (hfile == INVALID_HANDLE_VALUE) {
         int err = GetLastError();
 
         if (err == ERROR_ACCESS_DENIED)
             return -EACCES;
         return -1;
     }
+    s->fd = _open_osfhandle(hfile, O_RDWR);
     return 0;
 }
 
-static int raw_read(BlockDriverState *bs, int64_t sector_num,
-                    uint8_t *buf, int nb_sectors)
+static BlockDriverAIOCB *raw_aio_readv(BlockDriverState *bs,
+        int64_t sector_num, QEMUIOVector *qiov, int nb_sectors,
+        BlockDriverCompletionFunc *cb, void *opaque)
 {
     BDRVRawState *s = bs->opaque;
-    OVERLAPPED ov;
-    DWORD ret_count;
-    int ret;
-    int64_t offset = sector_num * 512;
-    int count = nb_sectors * 512;
 
-    memset(&ov, 0, sizeof(ov));
-    ov.Offset = offset;
-    ov.OffsetHigh = offset >> 32;
-    ret = ReadFile(s->hfile, buf, count, &ret_count, &ov);
-    if (!ret)
-        return ret_count;
-    if (ret_count == count)
-        ret_count = 0;
-    return ret_count;
+    return paio_submit(bs, s->fd, sector_num, qiov, nb_sectors,
+                       cb, opaque, QEMU_AIO_READ);
 }
 
-static int raw_write(BlockDriverState *bs, int64_t sector_num,
-                     const uint8_t *buf, int nb_sectors)
+static BlockDriverAIOCB *raw_aio_writev(BlockDriverState *bs,
+        int64_t sector_num, QEMUIOVector *qiov, int nb_sectors,
+        BlockDriverCompletionFunc *cb, void *opaque)
 {
     BDRVRawState *s = bs->opaque;
-    OVERLAPPED ov;
-    DWORD ret_count;
-    int ret;
-    int64_t offset = sector_num * 512;
-    int count = nb_sectors * 512;
 
-    memset(&ov, 0, sizeof(ov));
-    ov.Offset = offset;
-    ov.OffsetHigh = offset >> 32;
-    ret = WriteFile(s->hfile, buf, count, &ret_count, &ov);
-    if (!ret)
-        return ret_count;
-    if (ret_count == count)
-        ret_count = 0;
-    return ret_count;
+    return paio_submit(bs, s->fd, sector_num, qiov, nb_sectors,
+                       cb, opaque, QEMU_AIO_WRITE);
 }
 
-static int raw_flush(BlockDriverState *bs)
+static BlockDriverAIOCB *raw_aio_flush(BlockDriverState *bs,
+        BlockDriverCompletionFunc *cb, void *opaque)
 {
     BDRVRawState *s = bs->opaque;
-    int ret;
 
-    ret = FlushFileBuffers(s->hfile);
-    if (ret == 0) {
-        return -EIO;
-    }
-
-    return 0;
+    return paio_submit(bs, s->fd, 0, NULL, 0, cb, opaque, QEMU_AIO_FLUSH);
 }
+
 
 static void raw_close(BlockDriverState *bs)
 {
     BDRVRawState *s = bs->opaque;
-    CloseHandle(s->hfile);
+    close(s->fd);
 }
 
 static int raw_truncate(BlockDriverState *bs, int64_t offset)
 {
     BDRVRawState *s = bs->opaque;
-    LONG low, high;
 
-    low = offset;
-    high = offset >> 32;
-    if (!SetFilePointer(s->hfile, low, &high, FILE_BEGIN))
-	return -EIO;
-    if (!SetEndOfFile(s->hfile))
+    if (qemu_ftruncate64(s->fd, offset) < 0) {
         return -EIO;
+    }
     return 0;
 }
 
@@ -192,10 +164,12 @@ static int64_t raw_getlength(BlockDriverState *bs)
     DISK_GEOMETRY_EX dg;
     DWORD count;
     BOOL status;
+    HANDLE hfile;
 
+    hfile = _get_osfhandle(s->fd);
     switch(s->type) {
     case FTYPE_FILE:
-        l.LowPart = GetFileSize(s->hfile, (PDWORD)&l.HighPart);
+        l.LowPart = GetFileSize(hfile, (PDWORD)&l.HighPart);
         if (l.LowPart == 0xffffffffUL && GetLastError() != NO_ERROR)
             return -EIO;
         break;
@@ -205,7 +179,7 @@ static int64_t raw_getlength(BlockDriverState *bs)
         l.QuadPart = total.QuadPart;
         break;
     case FTYPE_HARDDISK:
-        status = DeviceIoControl(s->hfile, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
+        status = DeviceIoControl(hfile, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
                                  NULL, 0, &dg, sizeof(dg), &count, NULL);
         if (status != 0) {
             l = dg.DiskSize;
@@ -281,11 +255,9 @@ static BlockDriver bdrv_file = {
     .bdrv_file_open	= raw_open,
     .bdrv_close		= raw_close,
     .bdrv_create	= raw_create,
-
-    .bdrv_read              = raw_read,
-    .bdrv_write             = raw_write,
-    .bdrv_co_flush_to_disk  = raw_flush,
-
+    .bdrv_aio_flush	= raw_aio_flush,
+    .bdrv_aio_readv	= raw_aio_readv,
+    .bdrv_aio_writev	= raw_aio_writev,
     .bdrv_truncate	= raw_truncate,
     .bdrv_getlength	= raw_getlength,
     .bdrv_get_allocated_file_size
@@ -412,11 +384,9 @@ static BlockDriver bdrv_host_device = {
     .bdrv_file_open	= hdev_open,
     .bdrv_close		= raw_close,
     .bdrv_has_zero_init = hdev_has_zero_init,
-
-    .bdrv_read              = raw_read,
-    .bdrv_write             = raw_write,
-    .bdrv_co_flush_to_disk  = raw_flush,
-
+    .bdrv_aio_flush	= raw_aio_flush,
+    .bdrv_aio_readv	= raw_aio_readv,
+    .bdrv_aio_writev	= raw_aio_writev,
     .bdrv_getlength	= raw_getlength,
     .bdrv_get_allocated_file_size
                         = raw_get_allocated_file_size,
