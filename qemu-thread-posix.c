@@ -17,6 +17,7 @@
 #include <signal.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/time.h>
 #include "qemu-thread.h"
 
 static void error_exit(int err, const char *msg)
@@ -113,6 +114,27 @@ void qemu_cond_wait(QemuCond *cond, QemuMutex *mutex)
     err = pthread_cond_wait(&cond->cond, &mutex->lock);
     if (err)
         error_exit(err, __func__);
+}
+
+int qemu_cond_timedwait(QemuCond *cond, QemuMutex *mutex,
+                        unsigned int timeout_ms)
+{
+    struct timespec ts;
+    struct timeval tv;
+    int err;
+
+    gettimeofday(&tv, NULL);
+    ts.tv_sec = tv.tv_sec + timeout_ms / 1000;
+    ts.tv_nsec = tv.tv_usec * 1000 + timeout_ms % 1000;
+    if (ts.tv_nsec > 1000000000) {
+        ts.tv_sec++;
+        ts.tv_nsec -= 1000000000;
+    }
+    err = pthread_cond_timedwait(&cond->cond, &mutex->lock, &ts);
+    if (err && err != ETIMEDOUT) {
+        error_exit(err, __func__);
+    }
+    return err == 0;
 }
 
 void qemu_thread_create(QemuThread *thread,

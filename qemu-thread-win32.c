@@ -158,6 +158,14 @@ void qemu_cond_broadcast(QemuCond *cond)
 
 void qemu_cond_wait(QemuCond *cond, QemuMutex *mutex)
 {
+    qemu_cond_timedwait(cond, mutex, INFINITE);
+}
+
+int qemu_cond_timedwait(QemuCond *cond, QemuMutex *mutex,
+                        unsigned int timeout_ms)
+{
+    DWORD result;
+
     /*
      * This access is protected under the mutex.
      */
@@ -170,7 +178,11 @@ void qemu_cond_wait(QemuCond *cond, QemuMutex *mutex)
      * leaving mutex unlocked before we wait on semaphore.
      */
     qemu_mutex_unlock(mutex);
-    WaitForSingleObject(cond->sema, INFINITE);
+    result = WaitForSingleObject(cond->sema, timeout_ms);
+
+    if (result != WAIT_OBJECT_0 && result != WAIT_TIMEOUT) {
+        error_exit(GetLastError(), __func__);
+    }
 
     /* Now waiters must rendez-vous with the signaling thread and
      * let it continue.  For cond_broadcast this has heavy contention
@@ -190,6 +202,8 @@ void qemu_cond_wait(QemuCond *cond, QemuMutex *mutex)
     }
 
     qemu_mutex_lock(mutex);
+
+    return result == WAIT_OBJECT_0;
 }
 
 struct QemuThreadData {
