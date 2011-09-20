@@ -68,6 +68,7 @@ static int idle_threads = 0;
 static int new_threads = 0;     /* backlog of threads we need to create */
 static int pending_threads = 0; /* threads created but not running yet */
 static QEMUBH *new_thread_bh;
+static QEMUTimer *gc_timer;
 static QTAILQ_HEAD(, qemu_paiocb) request_list;
 
 #ifdef CONFIG_PREADV
@@ -286,15 +287,16 @@ static void *aio_thread(void *unused)
 
     while (1) {
         struct qemu_paiocb *aiocb;
-        bool timed_out = false;
-        ssize_t ret;
+        ssize_t ret = 0;
+        int64_t start;
 
         qemu_mutex_lock(&lock);
 
-        while (QTAILQ_EMPTY(&request_list) && !timed_out) {
+        start = qemu_get_clock_ms(rt_clock);
+        while (QTAILQ_EMPTY(&request_list) &&
+               qemu_get_clock_ms(rt_clock) - start < 10000) {
             idle_threads++;
-            timed_out = qemu_cond_timedwait(&cond, &lock,
-                                            AIO_THREAD_IDLE_TIMEOUT) != 0;
+            ret = cond_wait(&cond, &lock);
             idle_threads--;
         }
 
@@ -489,6 +491,9 @@ static void posix_aio_read(void *opaque)
     }
 
     posix_aio_process_queue(s);
+    if (!qemu_timer_pending(gc_timer)) {
+        qemu_mod_timer_ms(ts, qemu_get_clock_ms(rt_clock) + 10000);
+    }
 }
 
 static int posix_aio_flush(void *opaque)
@@ -608,6 +613,19 @@ BlockDriverAIOCB *paio_ioctl(BlockDriverState *bs, int fd,
     return &acb->common;
 }
 
+void gc_timer_cb(void *opaque)
+{
+    int n;
+
+    qemu_mutex_lock(&lock);
+    n = idle_threads;
+    qemu_cond_broadcast(&cond);
+    qemu_mutex_unlock(&lock);
+    if (n) {
+        qemu_mod_timer_ms(ts, qemu_get_clock_ms(rt_clock) + 10000);
+    }
+}
+
 int paio_init(void)
 {
     PosixAioState *s;
@@ -639,6 +657,7 @@ int paio_init(void)
 
     QTAILQ_INIT(&request_list);
     new_thread_bh = qemu_bh_new(spawn_thread_bh_fn, NULL);
+    gc_timer = qemu_new_timer_ms(rt_clock, gc_timer_cb, NULL);
 
     posix_aio_state = s;
     return 0;
