@@ -97,26 +97,26 @@ int qemu_aio_set_fd_handler(int fd,
     return 0;
 }
 
-void qemu_aio_flush(void)
+static bool qemu_aio_pending(void)
 {
     AioHandler *node;
-    int ret;
 
-    do {
-        ret = 0;
-
-	/*
-	 * If there are pending emulated aio start them now so flush
-	 * will be able to return 1.
-	 */
-        qemu_aio_wait();
-
-        QLIST_FOREACH(node, &aio_handlers, node) {
-            if (node->io_flush) {
-                ret |= node->io_flush(node->opaque);
-            }
+    QLIST_FOREACH(node, &aio_handlers, node) {
+        if (node->deleted) {
+            continue;
         }
-    } while (qemu_bh_poll() || ret > 0);
+        if (node->io_flush && node->io_flush(node->opaque)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void qemu_aio_flush(void)
+{
+    do {
+        qemu_aio_wait();
+    } while (qemu_bh_poll() || qemu_aio_pending());
 }
 
 void qemu_aio_wait(void)
@@ -136,6 +136,14 @@ void qemu_aio_wait(void)
         fd_set rdfds, wrfds;
         int max_fd = -1;
 
+        /* If there aren't pending AIO operations, no need to do anything.
+         * Otherwise, if there are no AIO requests, qemu_aio_wait() would
+         * wait indefinitely.
+         */
+        if (!qemu_aio_pending()) {
+            break;
+        }
+
         walking_handlers = 1;
 
         FD_ZERO(&rdfds);
@@ -143,13 +151,6 @@ void qemu_aio_wait(void)
 
         /* fill fd sets */
         QLIST_FOREACH(node, &aio_handlers, node) {
-            /* If there aren't pending AIO operations, don't invoke callbacks.
-             * Otherwise, if there are no AIO requests, qemu_aio_wait() would
-             * wait indefinitely.
-             */
-            if (node->io_flush && node->io_flush(node->opaque) == 0)
-                continue;
-
             if (!node->deleted && node->io_read) {
                 FD_SET(node->fd, &rdfds);
                 max_fd = MAX(max_fd, node->fd + 1);
@@ -161,10 +162,7 @@ void qemu_aio_wait(void)
         }
 
         walking_handlers = 0;
-
-        /* No AIO operations?  Get us out of here */
-        if (max_fd == -1)
-            break;
+        assert(max_fd > -1);
 
         /* wait until next event */
         ret = select(max_fd, &rdfds, &wrfds, NULL, NULL);
