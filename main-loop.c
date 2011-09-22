@@ -470,7 +470,9 @@ int main_loop_wait(int nonblocking)
 
     /* Check bottom-halves last in case any of the earlier events triggered
        them.  */
-    qemu_bh_poll();
+    if (qemu_bh_poll()) {
+        ret = 1;
+    }
 
     return ret;
 }
