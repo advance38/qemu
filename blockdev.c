@@ -686,16 +686,16 @@ void qmp_blockdev_snapshot_sync(const char *device, const char *snapshot_file,
         return;
     }
 
+    monitor_suspend(mon);
     ret = bdrv_img_create(snapshot_file, format, bs->filename,
                           bs->drv->format_name, NULL, -1, flags);
     if (ret) {
         error_set(errp, QERR_UNDEFINED_ERROR);
-        return;
+        goto out_resume;
     }
 
     bdrv_drain_all();
     bdrv_flush(bs);
-
     bdrv_close(bs);
     ret = bdrv_open(bs, snapshot_file, flags, drv);
     /*
@@ -711,6 +711,14 @@ void qmp_blockdev_snapshot_sync(const char *device, const char *snapshot_file,
             error_set(errp, QERR_OPEN_FILE_FAILED, snapshot_file);
         }
     }
+out_resume:
+    monitor_resume(mon);
+out:
+    if (ret) {
+        ret = -1;
+    }
+
+    return ret;
 }
 
 static void eject_device(BlockDriverState *bs, int force, Error **errp)
@@ -882,8 +890,10 @@ int do_drive_del(Monitor *mon, const QDict *qdict, QObject **ret_data)
     }
 
     /* quiesce block driver; prevent further io */
+    monitor_suspend(mon);
     bdrv_drain_all();
     bdrv_flush(bs);
+    monitor_resume(mon);
     bdrv_close(bs);
 
     /* if we have a device attached to this BlockDriverState
