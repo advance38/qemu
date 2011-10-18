@@ -65,8 +65,20 @@ int qemu_set_fd_handler2(int fd,
         }
     } else {
         QLIST_FOREACH(ioh, &io_handlers, next) {
-            if (ioh->fd == fd)
+            if (ioh->fd == fd) {
+                /*
+                 * If any handlers were added, we need to recompute fd_sets.
+                 * Same if ioh->fd_read_poll might have returned 0.
+                 * If any handlers were removed, trading a possible spurious
+                 * wakeup for a qemu_notify_event is useless.
+                 */
+                if ((fd_read_poll != ioh->fd_read_poll && ioh->fd_read_poll) ||
+                    (fd_read && !ioh->fd_read) ||
+                    (fd_write && !ioh->fd_write)) {
+                    qemu_notify_event();
+                }
                 goto found;
+            }
         }
         ioh = g_malloc0(sizeof(IOHandlerRecord));
         QLIST_INSERT_HEAD(&io_handlers, ioh, next);
