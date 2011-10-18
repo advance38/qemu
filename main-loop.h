@@ -71,23 +71,15 @@ int main_loop_init(void);
  * It is sometimes useful to put a whole program in a coroutine.  In this
  * case, the coroutine actually should be started from within the main loop,
  * so that the main loop can run whenever the coroutine yields.  To do this,
- * you can use a bottom half to enter the coroutine as soon as the main loop
- * starts:
+ * you can use qemu_coroutine_schedule.
  *
- *     void enter_co_bh(void *opaque) {
- *         QEMUCoroutine *co = opaque;
- *         qemu_coroutine_enter(co, NULL);
- *     }
- *
- *     ...
- *     QEMUCoroutine *co = qemu_coroutine_create(coroutine_entry);
- *     QEMUBH *start_bh = qemu_bh_new(enter_co_bh, co);
- *     qemu_bh_schedule(start_bh);
- *     while (...) {
+ *     int ret = -1;
+ *     Coroutine *co = qemu_coroutine_create(coroutine_entry);
+ *     qemu_init_main_loop();
+ *     qemu_coroutine_schedule(co, &ret);
+ *     while (ret == -1) {
  *         main_loop_wait(false);
  *     }
- *
- * (In the future we may provide a wrapper for this).
  *
  * @nonblocking: Whether the caller should block until an event occurs.
  */

@@ -208,4 +208,12 @@ void qemu_co_rwlock_unlock(CoRwlock *lock);
  */
 void coroutine_fn co_sleep_ns(QEMUClock *clock, int64_t ns);
 
+/**
+ * Transfer control to a coroutine from a bottom half
+ *
+ * The opaque argument is passed as the argument to the entry point when
+ * entering the coroutine for the first time.  It is subsequently ignored.
+ */
+void qemu_coroutine_schedule(Coroutine *coroutine, void *opaque);
+
 #endif /* QEMU_COROUTINE_H */

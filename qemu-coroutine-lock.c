@@ -169,3 +169,27 @@ void qemu_co_rwlock_wrlock(CoRwlock *lock)
     }
     lock->writer = true;
 }
+
+typedef struct {
+    QEMUBH *bh;
+    Coroutine *co;
+    void *opaque;
+} CoroutineBHArgs;
+
+static void qemu_coroutine_schedule_bh(void *opaque)
+{
+    CoroutineBHArgs args = *(CoroutineBHArgs *)opaque;
+    g_free(opaque);
+    qemu_bh_delete(args.bh);
+    qemu_coroutine_enter(args.co, args.opaque);
+}
+
+void qemu_coroutine_schedule(Coroutine *co, void *opaque)
+{
+    CoroutineBHArgs *args = g_malloc(sizeof(CoroutineBHArgs));
+    args->bh = qemu_bh_new(qemu_coroutine_schedule_bh, args);
+    args->co = co;
+    args->opaque = opaque;
+    qemu_bh_schedule(args->bh);
+}
+

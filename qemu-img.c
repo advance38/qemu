@@ -24,6 +24,8 @@
 #include "qemu-common.h"
 #include "qemu-option.h"
 #include "qemu-error.h"
+#include "qemu-coroutine.h"
+#include "main-loop.h"
 #include "osdep.h"
 #include "sysemu.h"
 #include "block_int.h"
@@ -1642,27 +1644,49 @@ static const img_cmd_t img_cmds[] = {
     { NULL, NULL, },
 };
 
-int main(int argc, char **argv)
+typedef struct {
+    int argc;
+    char **argv;
+    int ret;
+} MainArgs;
+
+static void main_co_entry(void *opaque)
 {
+    MainArgs *args = opaque;
     const img_cmd_t *cmd;
     const char *cmdname;
 
-    error_set_progname(argv[0]);
-
-    bdrv_init();
-    if (argc < 2)
+    if (args->argc < 2)
         help();
-    cmdname = argv[1];
-    argc--; argv++;
+    cmdname = args->argv[1];
+    args->argc--; args->argv++;
 
     /* find the command */
     for(cmd = img_cmds; cmd->name != NULL; cmd++) {
         if (!strcmp(cmdname, cmd->name)) {
-            return cmd->handler(argc, argv);
+            args->ret = cmd->handler(args->argc, args->argv);
+            return;
         }
     }
 
     /* not found */
     help();
+    args->ret = 0;
+}
+
+#define NOT_DONE 0x7fffffff
+
+int main(int argc, char **argv)
+{
+    error_set_progname(argv[0]);
+    MainArgs args = { .argc = argc, .argv = argv, .ret = NOT_DONE };
+    Coroutine *co = qemu_coroutine_create(main_co_entry);
+
+    qemu_init_main_loop();
+    bdrv_init();
+    qemu_coroutine_schedule(co, &args);
+    while (args.ret == NOT_DONE) {
+        main_loop_wait(false);
+    }
     return 0;
 }
