@@ -47,11 +47,15 @@ static void conv_16_to_pixel(PixelFormat *pf,
 {
     uint16_t *src16 = src;
 
+    rshift = 32 - pf->rbits - pf->rshift;
+    gshift = 32 - pf->gbits - pf->gshift;
+    bshift = 32 - pf->bbits - pf->bshift;
+    ashift = 32 - pf->abits - pf->ashift;
     while (cnt > 0) {
-        dst->red   = ((*src16 & pf->rmask) >> pf->rshift) << (8 - pf->rbits);
-        dst->green = ((*src16 & pf->gmask) >> pf->gshift) << (8 - pf->gbits);
-        dst->blue  = ((*src16 & pf->bmask) >> pf->bshift) << (8 - pf->bbits);
-        dst->alpha = ((*src16 & pf->amask) >> pf->ashift) << (8 - pf->abits);
+        dst->red   = ((*src16 << rshift) >> 24) & pf->rmax;
+        dst->green = ((*src16 << gshift) >> 24) & pf->gmax;
+        dst->blue  = ((*src16 << bshift) >> 24) & pf->bmax;
+        dst->alpha = ((*src16 << ashift) >> 24) & pf->amax;
         dst++, src16++, cnt--;
     }
 }
@@ -63,10 +67,10 @@ static void conv_32_to_pixel_fast(PixelFormat *pf,
     uint32_t *src32 = src;
 
     while (cnt > 0) {
-        dst->red   = (*src32 & pf->rmask) >> pf->rshift;
-        dst->green = (*src32 & pf->gmask) >> pf->gshift;
-        dst->blue  = (*src32 & pf->bmask) >> pf->bshift;
-        dst->alpha = (*src32 & pf->amask) >> pf->ashift;
+        dst->red   = *src32 >> pf->rshift;
+        dst->green = *src32 >> pf->gshift;
+        dst->blue  = *src32 >> pf->bshift;
+        dst->alpha = *src32 >> pf->ashift;
         dst++, src32++, cnt--;
     }
 }
@@ -76,27 +80,15 @@ static void conv_32_to_pixel_generic(PixelFormat *pf,
 {
     uint32_t *src32 = src;
 
+    rshift = 32 - pf->rbits - pf->rshift;
+    gshift = 32 - pf->gbits - pf->gshift;
+    bshift = 32 - pf->bbits - pf->bshift;
+    ashift = 32 - pf->abits - pf->ashift;
     while (cnt > 0) {
-        if (pf->rbits < 8) {
-            dst->red   = ((*src32 & pf->rmask) >> pf->rshift) << (8 - pf->rbits);
-        } else {
-            dst->red   = ((*src32 & pf->rmask) >> pf->rshift) >> (pf->rbits - 8);
-        }
-        if (pf->gbits < 8) {
-            dst->green = ((*src32 & pf->gmask) >> pf->gshift) << (8 - pf->gbits);
-        } else {
-            dst->green = ((*src32 & pf->gmask) >> pf->gshift) >> (pf->gbits - 8);
-        }
-        if (pf->bbits < 8) {
-            dst->blue  = ((*src32 & pf->bmask) >> pf->bshift) << (8 - pf->bbits);
-        } else {
-            dst->blue  = ((*src32 & pf->bmask) >> pf->bshift) >> (pf->bbits - 8);
-        }
-        if (pf->abits < 8) {
-            dst->alpha = ((*src32 & pf->amask) >> pf->ashift) << (8 - pf->abits);
-        } else {
-            dst->alpha = ((*src32 & pf->amask) >> pf->ashift) >> (pf->abits - 8);
-        }
+        dst->red   = ((*src32 << rshift) >> 24) & pf->rmax;
+        dst->green = ((*src32 << gshift) >> 24) & pf->gmax;
+        dst->blue  = ((*src32 << bshift) >> 24) & pf->bmax;
+        dst->alpha = ((*src32 << ashift) >> 24) & pf->amax;
         dst++, src32++, cnt--;
     }
 }
