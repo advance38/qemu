@@ -143,11 +143,6 @@ static PixelFormat sdl_to_qemu_pixelformat(SDL_PixelFormat *sdl_pf)
     qemu_pf.bytes_per_pixel = sdl_pf->BytesPerPixel;
     qemu_pf.depth = (qemu_pf.bits_per_pixel) == 32 ? 24 : (qemu_pf.bits_per_pixel);
 
-    qemu_pf.rmask = sdl_pf->Rmask;
-    qemu_pf.gmask = sdl_pf->Gmask;
-    qemu_pf.bmask = sdl_pf->Bmask;
-    qemu_pf.amask = sdl_pf->Amask;
-
     qemu_pf.rshift = sdl_pf->Rshift;
     qemu_pf.gshift = sdl_pf->Gshift;
     qemu_pf.bshift = sdl_pf->Bshift;

@@ -1596,9 +1596,6 @@ PixelFormat qemu_different_endianness_pixelformat(int bpp)
 
     switch (bpp) {
         case 24:
-            pf.rmask = 0x000000FF;
-            pf.gmask = 0x0000FF00;
-            pf.bmask = 0x00FF0000;
             pf.rmax = 255;
             pf.gmax = 255;
             pf.bmax = 255;
@@ -1610,10 +1607,6 @@ PixelFormat qemu_different_endianness_pixelformat(int bpp)
             pf.bbits = 8;
             break;
         case 32:
-            pf.rmask = 0x0000FF00;
-            pf.gmask = 0x00FF0000;
-            pf.bmask = 0xFF000000;
-            pf.amask = 0x00000000;
             pf.amax = 255;
             pf.rmax = 255;
             pf.gmax = 255;
@@ -1647,9 +1640,6 @@ PixelFormat qemu_default_pixelformat(int bpp)
         case 15:
             pf.bits_per_pixel = 16;
             pf.bytes_per_pixel = 2;
-            pf.rmask = 0x00007c00;
-            pf.gmask = 0x000003E0;
-            pf.bmask = 0x0000001F;
             pf.rmax = 31;
             pf.gmax = 31;
             pf.bmax = 31;
@@ -1661,9 +1651,6 @@ PixelFormat qemu_default_pixelformat(int bpp)
             pf.bbits = 5;
             break;
         case 16:
-            pf.rmask = 0x0000F800;
-            pf.gmask = 0x000007E0;
-            pf.bmask = 0x0000001F;
             pf.rmax = 31;
             pf.gmax = 63;
             pf.bmax = 31;
@@ -1675,9 +1662,6 @@ PixelFormat qemu_default_pixelformat(int bpp)
             pf.bbits = 5;
             break;
         case 24:
-            pf.rmask = 0x00FF0000;
-            pf.gmask = 0x0000FF00;
-            pf.bmask = 0x000000FF;
             pf.rmax = 255;
             pf.gmax = 255;
             pf.bmax = 255;
@@ -1688,9 +1672,6 @@ PixelFormat qemu_default_pixelformat(int bpp)
             pf.gbits = 8;
             pf.bbits = 8;
         case 32:
-            pf.rmask = 0x00FF0000;
-            pf.gmask = 0x0000FF00;
-            pf.bmask = 0x000000FF;
             pf.amax = 255;
             pf.rmax = 255;
             pf.gmax = 255;
