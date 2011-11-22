@@ -88,8 +88,10 @@ static void sdl_setdata(DisplayState *ds)
 
     guest_screen = SDL_CreateRGBSurfaceFrom(ds_get_data(ds), ds_get_width(ds), ds_get_height(ds),
                                             ds_get_bits_per_pixel(ds), ds_get_linesize(ds),
-                                            ds->surface->pf.rmask, ds->surface->pf.gmask,
-                                            ds->surface->pf.bmask, ds->surface->pf.amask);
+                                            ds->surface->pf.rmax << ds->surface->pf.rshift,
+                                            ds->surface->pf.gmax << ds->surface->pf.gshift,
+                                            ds->surface->pf.bmax << ds->surface->pf.bshift,
+                                            ds->surface->pf.amax << ds->surface->pf.ashift);
 }
 
 static void do_sdl_resize(int width, int height, int bpp)
