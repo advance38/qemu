@@ -110,8 +110,8 @@ static void conv_pixel_to_16(PixelFormat *pf,
     }
 }
 
-static void conv_pixel_to_32(PixelFormat *pf,
-                             void *dst, QemuPixel *src, uint32_t cnt)
+static void conv_pixel_to_32_generic(PixelFormat *pf,
+                                     void *dst, QemuPixel *src, uint32_t cnt)
 {
     uint32_t *dst32 = dst;
 
@@ -120,6 +120,20 @@ static void conv_pixel_to_32(PixelFormat *pf,
         *dst32 |= ((uint32_t)src->green >> (8 - pf->gbits)) << pf->gshift;
         *dst32 |= ((uint32_t)src->blue  >> (8 - pf->bbits)) << pf->bshift;
         *dst32 |= ((uint32_t)src->alpha >> (8 - pf->abits)) << pf->ashift;
+        dst32++, src++, cnt--;
+    }
+}
+
+static void conv_pixel_to_32_fast(PixelFormat *pf,
+                                  void *dst, QemuPixel *src, uint32_t cnt)
+{
+    uint32_t *dst32 = dst;
+
+    while (cnt > 0) {
+        *dst32  = ((uint32_t)src->red)   << pf->rshift;
+        *dst32 |= ((uint32_t)src->green) << pf->gshift;
+        *dst32 |= ((uint32_t)src->blue)  << pf->bshift;
+        *dst32 |= ((uint32_t)src->alpha) << pf->ashift;
         dst32++, src++, cnt--;
     }
 }
@@ -177,7 +191,11 @@ QemuPfConv *qemu_pf_conv_get(PixelFormat *dst, PixelFormat *src)
             conv->conv_to = conv_pixel_to_16;
             break;
         case 4:
-            conv->conv_to = conv_pixel_to_32;
+            if (conv->dst.rbits == 8 && conv->dst.gbits == 8 && conv->dst.bbits == 8) {
+                conv->conv_to = conv_pixel_to_32_fast;
+            } else {
+                conv->conv_to = conv_pixel_to_32_generic;
+            }
             break;
         default:
             goto err;
