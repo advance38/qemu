@@ -574,11 +574,11 @@ void vnc_convert_pixel(VncState *vs, uint8_t *buf, uint32_t v)
     uint8_t r, g, b;
     VncDisplay *vd = vs->vd;
 
-    r = ((((v & vd->server->pf.rmask) >> vd->server->pf.rshift) << vs->clientds.pf.rbits) >>
+    r = ((((v >> vd->server->pf.rshift) & vd->server->pf.rmax) << vs->clientds.pf.rbits) >>
         vd->server->pf.rbits);
-    g = ((((v & vd->server->pf.gmask) >> vd->server->pf.gshift) << vs->clientds.pf.gbits) >>
+    g = ((((v >> vd->server->pf.gshift) & vd->server->pf.gmax) << vs->clientds.pf.gbits) >>
         vd->server->pf.gbits);
-    b = ((((v & vd->server->pf.bmask) >> vd->server->pf.bshift) << vs->clientds.pf.bbits) >>
+    b = ((((v >> vd->server->pf.bshift) & vd->server->pf.bmax) << vs->clientds.pf.bbits) >>
         vd->server->pf.bbits);
     v = (r << vs->clientds.pf.rshift) |
         (g << vs->clientds.pf.gshift) |
