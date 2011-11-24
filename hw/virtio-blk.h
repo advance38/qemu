@@ -107,4 +107,17 @@ struct VirtIOBlkConf
 #define DEFINE_VIRTIO_BLK_FEATURES(_state, _field) \
         DEFINE_VIRTIO_COMMON_FEATURES(_state, _field)
 
+#ifdef __linux__
+#define DEFINE_VIRTIO_BLK_PROPERTIES(_state, _features_field, _conf_field) \
+        DEFINE_VIRTIO_BLK_FEATURES(_state, _features_field), \
+        DEFINE_BLOCK_PROPERTIES(_state, _conf_field.conf), \
+        DEFINE_PROP_STRING("serial", _state, _conf_field.serial)
+#else
+#define DEFINE_VIRTIO_BLK_PROPERTIES(_state, _features_field, _conf_field) \
+        DEFINE_VIRTIO_BLK_FEATURES(_state, _features_field), \
+        DEFINE_BLOCK_PROPERTIES(_state, _conf_field.conf), \
+        DEFINE_PROP_STRING("serial", _state, _conf_field.serial), \
+        DEFINE_PROP_BIT("scsi", _state, _conf_field.scsi, 0, true)
+#endif
+
 #endif
