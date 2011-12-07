@@ -208,3 +208,49 @@ int qemu_utimens(const char *path, const struct timespec *times)
 
     return utimes(path, &tv[0]);
 }
+
+/*
+ * Make sure data goes on disk, but if possible do not bother to
+ * write out the inode just for timestamp updates.
+ *
+ * Unfortunately even in 2009 many operating systems do not support
+ * fdatasync and have to fall back to fsync.
+ */
+int qemu_fdatasync(int fd)
+{
+#ifdef CONFIG_FDATASYNC
+    return fdatasync(fd);
+#else
+    return fsync(fd);
+#endif
+}
+
+#ifdef CONFIG_PREADV
+
+ssize_t
+qemu_preadv(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    return preadv(fd, iov, nr_iov, offset);
+}
+
+ssize_t
+qemu_pwritev(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    return pwritev(fd, iov, nr_iov, offset);
+}
+
+#else
+
+ssize_t
+qemu_preadv(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    return -ENOSYS;
+}
+
+ssize_t
+qemu_pwritev(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    return -ENOSYS;
+}
+
+#endif

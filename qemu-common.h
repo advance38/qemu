@@ -175,6 +175,9 @@ ssize_t qemu_write_full(int fd, const void *buf, size_t count)
     QEMU_WARN_UNUSED_RESULT;
 void qemu_set_cloexec(int fd);
 
+ssize_t qemu_preadv(int fd, const struct iovec *iov, int nr_iov, off_t offset);
+ssize_t qemu_pwritev(int fd, const struct iovec *iov, int nr_iov, off_t offset);
+
 #ifndef _WIN32
 int qemu_eventfd(int pipefd[2]);
 int qemu_pipe(int pipefd[2]);

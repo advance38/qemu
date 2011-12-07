@@ -117,36 +117,6 @@ static ssize_t handle_aiocb_flush(struct qemu_paiocb *aiocb)
     return 0;
 }
 
-#ifdef CONFIG_PREADV
-
-static ssize_t
-qemu_preadv(int fd, const struct iovec *iov, int nr_iov, off_t offset)
-{
-    return preadv(fd, iov, nr_iov, offset);
-}
-
-static ssize_t
-qemu_pwritev(int fd, const struct iovec *iov, int nr_iov, off_t offset)
-{
-    return pwritev(fd, iov, nr_iov, offset);
-}
-
-#else
-
-static ssize_t
-qemu_preadv(int fd, const struct iovec *iov, int nr_iov, off_t offset)
-{
-    return -ENOSYS;
-}
-
-static ssize_t
-qemu_pwritev(int fd, const struct iovec *iov, int nr_iov, off_t offset)
-{
-    return -ENOSYS;
-}
-
-#endif
-
 static ssize_t handle_aiocb_rw_vector(struct qemu_paiocb *aiocb)
 {
     ssize_t len;

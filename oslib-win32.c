@@ -118,3 +118,65 @@ int qemu_gettimeofday(qemu_timeval *tp)
      Do not set errno on error.  */
   return 0;
 }
+
+int qemu_fdatasync(int fd)
+{
+    int ret;
+    HANDLE hfile;
+
+    hfile = _get_osfhandle(fd);
+    ret = FlushFileBuffers(hfile);
+    if (ret == 0) {
+        errno = EIO;
+        return -1;
+    }
+    return 0;
+}
+
+#ifdef _WIN32
+
+ssize_t
+qemu_preadv(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    HANDLE hfile = _get_osfhandle(fd);
+    size_t total = 0;
+    for (; nr_iov--; offset += iov->iov_len, total += iov->iov_len, iov++) {
+        OVERLAPPED ov;
+        DWORD ret_count;
+        int ret;
+
+        memset(&ov, 0, sizeof(ov));
+        ov.Offset = offset;
+        ov.OffsetHigh = offset >> 32;
+        ret = ReadFile(hfile, iov->iov_base, iov->iov_len, &ret_count, &ov);
+        if (ret) {
+            errno = EIO;
+            return -1;
+        }
+    }
+    return total;
+}
+
+ssize_t
+qemu_pwritev(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    HANDLE hfile = _get_osfhandle(fd);
+    size_t total = 0;
+    for (; nr_iov--; offset += iov->iov_len, total += iov->iov_len, iov++) {
+        OVERLAPPED ov;
+        DWORD ret_count;
+        int ret;
+
+        memset(&ov, 0, sizeof(ov));
+        ov.Offset = offset;
+        ov.OffsetHigh = offset >> 32;
+        ret = WriteFile(hfile, iov->iov_base, iov->iov_len, &ret_count, &ov);
+        if (ret) {
+            errno = EIO;
+            return -1;
+        }
+    }
+    return total;
+}
+
+#endif
