@@ -24,6 +24,7 @@
 
 #include "qemu-common.h"
 #include "qemu-timer.h"
+#include "qemu_socket.h"
 #include "slirp/slirp.h"
 #include "main-loop.h"
 
