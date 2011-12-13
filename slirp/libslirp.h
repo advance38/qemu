@@ -2,6 +2,7 @@
 #define _LIBSLIRP_H
 
 #include "qemu-common.h"
+#include "main-loop.h"
 
 struct Slirp;
 typedef struct Slirp Slirp;
@@ -15,8 +16,7 @@ Slirp *slirp_init(int restricted, struct in_addr vnetwork,
                   struct in_addr vnameserver, void *opaque);
 void slirp_cleanup(Slirp *slirp);
 
-void slirp_select_fill(int *pnfds,
-                       fd_set *readfds, fd_set *writefds, fd_set *xfds);
+void slirp_select_fill(FDPrepareFunc *prepare);
 
 void slirp_select_poll(fd_set *readfds, fd_set *writefds, fd_set *xfds,
                        int select_error);

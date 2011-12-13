@@ -218,13 +218,30 @@ int main_loop_init(void)
     return 0;
 }
 
+static fd_set rfds, wfds, xfds;
+static int nfds;
+
+static void qemu_fd_prepare(int fd, bool rd, bool wr, bool pri)
+{
+    if (rd) {
+        FD_SET(fd, &rfds);
+        nfds = MAX(nfds, fd);
+    }
+    if (wr) {
+        FD_SET(fd, &wfds);
+        nfds = MAX(nfds, fd);
+    }
+    if (pri) {
+        FD_SET(fd, &xfds);
+        nfds = MAX(nfds, fd);
+    }
+}
 
 static GPollFD poll_fds[1024 * 2]; /* this is probably overkill */
 static int n_poll_fds;
 static int max_priority;
 
-static void glib_select_fill(int *max_fd, fd_set *rfds, fd_set *wfds,
-                             fd_set *xfds, int *cur_timeout)
+static void glib_select_fill(int *cur_timeout)
 {
     GMainContext *context = g_main_context_default();
     int i;
@@ -239,18 +256,10 @@ static void glib_select_fill(int *max_fd, fd_set *rfds, fd_set *wfds,
     for (i = 0; i < n_poll_fds; i++) {
         GPollFD *p = &poll_fds[i];
 
-        if ((p->events & G_IO_IN)) {
-            FD_SET(p->fd, rfds);
-            *max_fd = MAX(*max_fd, p->fd);
-        }
-        if ((p->events & G_IO_OUT)) {
-            FD_SET(p->fd, wfds);
-            *max_fd = MAX(*max_fd, p->fd);
-        }
-        if ((p->events & G_IO_ERR)) {
-            FD_SET(p->fd, xfds);
-            *max_fd = MAX(*max_fd, p->fd);
-        }
+        qemu_fd_prepare(p->fd,
+                        (p->events & G_IO_IN) != 0,
+                        (p->events & G_IO_OUT) != 0,
+                        (p->events & G_IO_ERR) != 0);
     }
 
     if (timeout >= 0 && timeout < *cur_timeout) {
@@ -418,8 +427,7 @@ static inline void os_host_main_loop_wait(int *timeout)
 
 int main_loop_wait(int nonblocking)
 {
-    fd_set rfds, wfds, xfds;
-    int ret, nfds;
+    int ret;
     struct timeval tv;
     int timeout;
 
@@ -438,11 +446,11 @@ int main_loop_wait(int nonblocking)
     FD_ZERO(&xfds);
 
 #ifdef CONFIG_SLIRP
-    slirp_select_fill(&nfds, &rfds, &wfds, &xfds);
+    slirp_select_fill(qemu_fd_prepare);
 #endif
-    qemu_iohandler_fill(&nfds, &rfds, &wfds, &xfds);
+    qemu_iohandler_fill(qemu_fd_prepare);
 
-    glib_select_fill(&nfds, &rfds, &wfds, &xfds, &timeout);
+    glib_select_fill(&timeout);
     os_host_main_loop_wait(&timeout);
 
     tv.tv_sec = timeout / 1000;

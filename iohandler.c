@@ -89,25 +89,20 @@ int qemu_set_fd_handler(int fd,
     return qemu_set_fd_handler2(fd, NULL, fd_read, fd_write, opaque);
 }
 
-void qemu_iohandler_fill(int *pnfds, fd_set *readfds, fd_set *writefds, fd_set *xfds)
+void qemu_iohandler_fill(FDPrepareFunc *prepare)
 {
     IOHandlerRecord *ioh;
 
     QLIST_FOREACH(ioh, &io_handlers, next) {
-        if (ioh->deleted)
+        bool rd = false, wr = false;
+        if (ioh->deleted) {
             continue;
-        if (ioh->fd_read &&
+        }
+        rd = (ioh->fd_read &&
             (!ioh->fd_read_poll ||
-             ioh->fd_read_poll(ioh->opaque) != 0)) {
-            FD_SET(ioh->fd, readfds);
-            if (ioh->fd > *pnfds)
-                *pnfds = ioh->fd;
-        }
-        if (ioh->fd_write) {
-            FD_SET(ioh->fd, writefds);
-            if (ioh->fd > *pnfds)
-                *pnfds = ioh->fd;
-        }
+             ioh->fd_read_poll(ioh->opaque) != 0));
+        wr = !!ioh->fd_write;
+        prepare(ioh->fd, rd, wr, false);
     }
 }
 

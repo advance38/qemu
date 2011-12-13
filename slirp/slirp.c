@@ -253,14 +253,11 @@ void slirp_cleanup(Slirp *slirp)
 
 #define CONN_CANFSEND(so) (((so)->so_state & (SS_FCANTSENDMORE|SS_ISFCONNECTED)) == SS_ISFCONNECTED)
 #define CONN_CANFRCV(so) (((so)->so_state & (SS_FCANTRCVMORE|SS_ISFCONNECTED)) == SS_ISFCONNECTED)
-#define UPD_NFDS(x) if (nfds < (x)) nfds = (x)
 
-void slirp_select_fill(int *pnfds,
-                       fd_set *readfds, fd_set *writefds, fd_set *xfds)
+void slirp_select_fill(FDPrepareFunc *prepare)
 {
     Slirp *slirp;
     struct socket *so, *so_next;
-    int nfds;
 
     if (QTAILQ_EMPTY(&slirp_instances)) {
         return;
@@ -271,7 +268,6 @@ void slirp_select_fill(int *pnfds,
     global_writefds = NULL;
     global_xfds = NULL;
 
-    nfds = *pnfds;
 	/*
 	 * First, TCP sockets
 	 */
@@ -287,6 +283,7 @@ void slirp_select_fill(int *pnfds,
 
 		for (so = slirp->tcb.so_next; so != &slirp->tcb;
 		     so = so_next) {
+			bool canfsend, canfrecv;
 			so_next = so->so_next;
 
 			/*
@@ -306,8 +303,7 @@ void slirp_select_fill(int *pnfds,
 			 * Set for reading sockets which are accepting
 			 */
 			if (so->so_state & SS_FACCEPTCONN) {
-                                FD_SET(so->s, readfds);
-				UPD_NFDS(so->s);
+				prepare(so->s, true, false, false);
 				continue;
 			}
 
@@ -315,8 +311,7 @@ void slirp_select_fill(int *pnfds,
 			 * Set for writing sockets which are connecting
 			 */
 			if (so->so_state & SS_ISFCONNECTING) {
-				FD_SET(so->s, writefds);
-				UPD_NFDS(so->s);
+				prepare(so->s, false, true, false);
 				continue;
 			}
 
@@ -324,20 +319,14 @@ void slirp_select_fill(int *pnfds,
 			 * Set for writing if we are connected, can send more, and
 			 * we have something to send
 			 */
-			if (CONN_CANFSEND(so) && so->so_rcv.sb_cc) {
-				FD_SET(so->s, writefds);
-				UPD_NFDS(so->s);
-			}
+			canfsend = (CONN_CANFSEND(so) && so->so_rcv.sb_cc);
 
 			/*
 			 * Set for reading (and urgent data) if we are connected, can
 			 * receive more, and we have room for it XXX /2 ?
 			 */
-			if (CONN_CANFRCV(so) && (so->so_snd.sb_cc < (so->so_snd.sb_datalen/2))) {
-				FD_SET(so->s, readfds);
-				FD_SET(so->s, xfds);
-				UPD_NFDS(so->s);
-			}
+			canfrecv = (CONN_CANFRCV(so) && (so->so_snd.sb_cc < (so->so_snd.sb_datalen/2)));
+			prepare(so->s, canfrecv, canfsend, canfrecv);
 		}
 
 		/*
@@ -369,8 +358,7 @@ void slirp_select_fill(int *pnfds,
 			 * (XXX <= 4 ?)
 			 */
 			if ((so->so_state & SS_ISFCONNECTED) && so->so_queued <= 4) {
-				FD_SET(so->s, readfds);
-				UPD_NFDS(so->s);
+				prepare(so->s, true, false, false);
 			}
 		}
 
@@ -394,13 +382,10 @@ void slirp_select_fill(int *pnfds,
                     }
 
                     if (so->so_state & SS_ISFCONNECTED) {
-                        FD_SET(so->s, readfds);
-                        UPD_NFDS(so->s);
+			prepare(so->s, true, false, false);
                     }
                 }
 	}
-
-        *pnfds = nfds;
 }
 
 void slirp_select_poll(fd_set *readfds, fd_set *writefds, fd_set *xfds,
