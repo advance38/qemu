@@ -254,10 +254,10 @@ static void qemu_fd_prepare(int fd, bool rd, bool wr, bool pri)
 }
 
 static GPollFD poll_fds[1024 * 2]; /* this is probably overkill */
-#ifndef _WIN32
 static int n_poll_fds;
 static int max_priority;
 
+#ifndef _WIN32
 static void glib_select_fill(int *cur_timeout)
 {
     GMainContext *context = g_main_context_default();
@@ -417,6 +417,7 @@ void qemu_del_wait_object(HANDLE handle, WaitObjectFunc *func, void *opaque)
 
 static int os_host_main_loop_wait(int timeout)
 {
+    GMainContext *context = g_main_context_default();
     int ret, i;
     PollingEntry *pe;
     WaitObjects *w = &wait_objects;
@@ -439,25 +440,33 @@ static int os_host_main_loop_wait(int timeout)
         }
     }
 
+    g_main_context_prepare(context, &max_priority);
+
+    n_poll_fds = g_main_context_query(context, max_priority, &timeout,
+                                      poll_fds, ARRAY_SIZE(poll_fds));
+    g_assert(n_poll_fds <= ARRAY_SIZE(poll_fds));
     for (i = 0; i < w->num; i++) {
-        poll_fds[i].fd = (DWORD) w->events[i];
-        poll_fds[i].events = G_IO_IN;
+        poll_fds[n_poll_fds + i].fd = (DWORD) w->events[i];
+        poll_fds[n_poll_fds + i].events = G_IO_IN;
     }
     qemu_mutex_unlock_iothread();
-    ret = g_poll(poll_fds, w->num, timeout);
+    ret = g_poll(poll_fds, n_poll_fds + w->num, timeout);
     qemu_mutex_lock_iothread();
     if (ret > 0) {
         for (i = 0; i < w->num; i++) {
-            if (poll_fds[i].revents) {
+            if (poll_fds[n_poll_fds + i].revents) {
                 w->func[i](w->opaque[i]);
             }
         }
     }
 
+    if (g_main_context_check(context, max_priority, poll_fds, n_poll_fds)) {
+        g_main_context_dispatch(context);
+    }
+
     /* If qemu_socket_handle was set, select will return a positive result
      * on the next iteration.  We do not need to do anything here.
      */
-
     return ret;
 }
 #endif
