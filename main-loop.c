@@ -253,8 +253,8 @@ static void qemu_fd_prepare(int fd, bool rd, bool wr, bool pri)
     }
 }
 
-#ifndef _WIN32
 static GPollFD poll_fds[1024 * 2]; /* this is probably overkill */
+#ifndef _WIN32
 static int n_poll_fds;
 static int max_priority;
 
@@ -417,9 +417,8 @@ void qemu_del_wait_object(HANDLE handle, WaitObjectFunc *func, void *opaque)
 
 static int os_host_main_loop_wait(int timeout)
 {
-    int ret, ret2, i;
+    int ret, i;
     PollingEntry *pe;
-    int err;
     WaitObjects *w = &wait_objects;
     static struct timeval tv0;
 
@@ -440,30 +439,19 @@ static int os_host_main_loop_wait(int timeout)
         }
     }
 
+    for (i = 0; i < w->num; i++) {
+        poll_fds[i].fd = (DWORD) w->events[i];
+        poll_fds[i].events = G_IO_IN;
+    }
     qemu_mutex_unlock_iothread();
-    ret = WaitForMultipleObjects(w->num, w->events, FALSE, timeout);
+    ret = g_poll(poll_fds, w->num, timeout);
     qemu_mutex_lock_iothread();
-    if (WAIT_OBJECT_0 + 0 <= ret && ret <= WAIT_OBJECT_0 + w->num - 1) {
-        if (w->func[ret - WAIT_OBJECT_0]) {
-            w->func[ret - WAIT_OBJECT_0](w->opaque[ret - WAIT_OBJECT_0]);
-        }
-
-        /* Check for additional signaled events */
-        for (i = (ret - WAIT_OBJECT_0 + 1); i < w->num; i++) {
-            /* Check if event is signaled */
-            ret2 = WaitForSingleObject(w->events[i], 0);
-            if (ret2 == WAIT_OBJECT_0) {
-                if (w->func[i]) {
-                    w->func[i](w->opaque[i]);
-                }
-            } else if (ret2 != WAIT_TIMEOUT) {
-                err = GetLastError();
-                fprintf(stderr, "WaitForSingleObject error %d %d\n", i, err);
+    if (ret > 0) {
+        for (i = 0; i < w->num; i++) {
+            if (poll_fds[i].revents) {
+                w->func[i](w->opaque[i]);
             }
         }
-    } else if (ret != WAIT_TIMEOUT) {
-        err = GetLastError();
-        fprintf(stderr, "WaitForMultipleObjects error %d %d\n", ret, err);
     }
 
     /* If qemu_socket_handle was set, select will return a positive result
