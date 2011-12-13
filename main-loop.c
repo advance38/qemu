@@ -164,7 +164,8 @@ static int qemu_signal_init(void)
 
 #else /* _WIN32 */
 
-HANDLE qemu_event_handle = NULL;
+HANDLE qemu_event_handle;
+HANDLE qemu_socket_handle;
 
 static void dummy_event_handler(void *opaque)
 {
@@ -173,11 +174,13 @@ static void dummy_event_handler(void *opaque)
 static int qemu_event_init(void)
 {
     qemu_event_handle = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!qemu_event_handle) {
+    qemu_socket_handle = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!qemu_event_handle || !qemu_socket_handle) {
         fprintf(stderr, "Failed CreateEvent: %ld\n", GetLastError());
         return -1;
     }
     qemu_add_wait_object(qemu_event_handle, dummy_event_handler, NULL);
+    qemu_add_wait_object(qemu_socket_handle, dummy_event_handler, NULL);
     return 0;
 }
 
@@ -223,6 +226,19 @@ static int nfds;
 
 static void qemu_fd_prepare(int fd, bool rd, bool wr, bool pri)
 {
+#ifdef _WIN32
+    int flags = 0;
+    if (rd) {
+        flags |= FD_READ | FD_ACCEPT;
+    }
+    if (wr) {
+        flags |= FD_WRITE | FD_CONNECT;
+    }
+    if (pri) {
+        flags |= FD_OOB;
+    }
+    WSAEventSelect(fd, qemu_socket_handle, flags);
+#endif
     if (rd) {
         FD_SET(fd, &rfds);
         nfds = MAX(nfds, fd);
@@ -403,6 +419,8 @@ static int os_host_main_loop_wait(int timeout)
 {
     int ret, ret2, i;
     PollingEntry *pe;
+    int err;
+    WaitObjects *w = &wait_objects;
     static struct timeval tv0;
 
     /* XXX: need to suppress polling by better using win32 events */
@@ -410,38 +428,48 @@ static int os_host_main_loop_wait(int timeout)
     for (pe = first_polling_entry; pe != NULL; pe = pe->next) {
         ret |= pe->func(pe->opaque);
     }
-    if (ret == 0) {
-        int err;
-        WaitObjects *w = &wait_objects;
+    if (ret != 0) {
+        return ret;
+    }
 
-        qemu_mutex_unlock_iothread();
-        ret = WaitForMultipleObjects(w->num, w->events, FALSE, timeout);
-        qemu_mutex_lock_iothread();
-        if (WAIT_OBJECT_0 + 0 <= ret && ret <= WAIT_OBJECT_0 + w->num - 1) {
-            if (w->func[ret - WAIT_OBJECT_0]) {
-                w->func[ret - WAIT_OBJECT_0](w->opaque[ret - WAIT_OBJECT_0]);
-            }
-
-            /* Check for additional signaled events */
-            for (i = (ret - WAIT_OBJECT_0 + 1); i < w->num; i++) {
-                /* Check if event is signaled */
-                ret2 = WaitForSingleObject(w->events[i], 0);
-                if (ret2 == WAIT_OBJECT_0) {
-                    if (w->func[i]) {
-                        w->func[i](w->opaque[i]);
-                    }
-                } else if (ret2 != WAIT_TIMEOUT) {
-                    err = GetLastError();
-                    fprintf(stderr, "WaitForSingleObject error %d %d\n", i, err);
-                }
-            }
-        } else if (ret != WAIT_TIMEOUT) {
-            err = GetLastError();
-            fprintf(stderr, "WaitForMultipleObjects error %d %d\n", ret, err);
+    ResetEvent(qemu_socket_handle);
+    if (nfds >= 0) {
+        ret = select(nfds + 1, &rfds, &wfds, &xfds, &tv0);
+        if (ret != 0) {
+            timeout = 0;
         }
     }
 
-    ret = select(nfds + 1, &rfds, &wfds, &xfds, &tv0);
+    qemu_mutex_unlock_iothread();
+    ret = WaitForMultipleObjects(w->num, w->events, FALSE, timeout);
+    qemu_mutex_lock_iothread();
+    if (WAIT_OBJECT_0 + 0 <= ret && ret <= WAIT_OBJECT_0 + w->num - 1) {
+        if (w->func[ret - WAIT_OBJECT_0]) {
+            w->func[ret - WAIT_OBJECT_0](w->opaque[ret - WAIT_OBJECT_0]);
+        }
+
+        /* Check for additional signaled events */
+        for (i = (ret - WAIT_OBJECT_0 + 1); i < w->num; i++) {
+            /* Check if event is signaled */
+            ret2 = WaitForSingleObject(w->events[i], 0);
+            if (ret2 == WAIT_OBJECT_0) {
+                if (w->func[i]) {
+                    w->func[i](w->opaque[i]);
+                }
+            } else if (ret2 != WAIT_TIMEOUT) {
+                err = GetLastError();
+                fprintf(stderr, "WaitForSingleObject error %d %d\n", i, err);
+            }
+        }
+    } else if (ret != WAIT_TIMEOUT) {
+        err = GetLastError();
+        fprintf(stderr, "WaitForMultipleObjects error %d %d\n", ret, err);
+    }
+
+    /* If qemu_socket_handle was set, select will return a positive result
+     * on the next iteration.  We do not need to do anything here.
+     */
+
     return ret;
 }
 #endif
