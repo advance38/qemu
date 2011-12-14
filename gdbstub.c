@@ -2740,7 +2740,7 @@ static int gdbserver_open(int port)
     struct sockaddr_in sockaddr;
     int fd, val, ret;
 
-    fd = socket(PF_INET, SOCK_STREAM, 0);
+    fd = qemu_socket(PF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         perror("socket");
         return -1;
