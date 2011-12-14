@@ -1141,7 +1141,7 @@ long vnc_client_write_buf(VncState *vs, const uint8_t *data, size_t datalen)
 #endif /* CONFIG_VNC_TLS */
         ret = write(vs->csock, (const void *)data, datalen);
     VNC_DEBUG("Wrote wire %p %zd -> %ld\n", data, datalen, ret);
-    return vnc_client_io_error(vs, ret, socket_error());
+    return vnc_client_io_error(vs, ret, errno);
 }
 
 
@@ -1258,7 +1258,7 @@ long vnc_client_read_buf(VncState *vs, uint8_t *data, size_t datalen)
 #endif /* CONFIG_VNC_TLS */
         ret = read(vs->csock, data, datalen);
     VNC_DEBUG("Read wire %p %zd -> %ld\n", data, datalen, ret);
-    return vnc_client_io_error(vs, ret, socket_error());
+    return vnc_client_io_error(vs, ret, errno);
 }
 
 

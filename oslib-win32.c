@@ -129,7 +129,7 @@ int qemu_close_socket(int fd)
     SOCKET s = _get_osfhandle(fd);
     int rc = closesocket(s);
     if (rc < 0) {
-        rc = -socket_error();
+        rc = -WSAGetLastError();
     }
     close(fd);
     return rc;
@@ -139,7 +139,7 @@ int qemu_listen(int fd, int backlog)
 {
     int rc = listen(_get_osfhandle(fd), backlog);
     if (rc < 0) {
-        rc = -socket_error();
+        rc = -WSAGetLastError();
     }
     return rc;
 }
@@ -148,7 +148,7 @@ int qemu_bind(int fd, const struct sockaddr *addr, socklen_t addrlen)
 {
     int rc = bind(_get_osfhandle(fd), addr, addrlen);
     if (rc < 0) {
-        rc = -socket_error();
+        rc = -WSAGetLastError();
     }
     return rc;
 }
@@ -157,7 +157,7 @@ int qemu_connect(int fd, const struct sockaddr *addr, socklen_t addrlen)
 {
     int rc = connect(_get_osfhandle(fd), addr, addrlen);
     if (rc < 0) {
-        rc = -socket_error();
+        rc = -WSAGetLastError();
     }
     return rc;
 }
@@ -166,7 +166,7 @@ int qemu_getsockopt(int fd, int level, int opt, void *val, socklen_t *len)
 {
     int rc = getsockopt(_get_osfhandle(fd), level, opt, val, len);
     if (rc < 0) {
-        rc = -socket_error();
+        rc = -WSAGetLastError();
     }
     return rc;
 }
@@ -175,7 +175,7 @@ int qemu_accept(int s, struct sockaddr *addr, socklen_t *addrlen)
 {
     int fd = accept(_get_osfhandle(s), addr, addrlen);
     if (fd < 0) {
-        return -socket_error();
+        return -WSAGetLastError();
     }
     qemu_set_cloexec(fd);
     return _open_osfhandle(fd, O_RDWR | O_BINARY);
@@ -185,7 +185,7 @@ int qemu_setsockopt(int fd, int level, int opt, const void *val, socklen_t len)
 {
     int rc = setsockopt(_get_osfhandle(fd), level, opt, val, len);
     if (rc < 0) {
-        rc = -socket_error();
+        rc = -WSAGetLastError();
     }
     return rc;
 }
@@ -199,7 +199,7 @@ int qemu_socket(int domain, int type, int protocol)
      * used with ReadFile/WriteFile.  */
     int fd = WSASocket(domain, type, protocol, NULL, 0, 0);
     if (fd < 0) {
-        return -socket_error();
+        return -WSAGetLastError();
     }
     qemu_set_cloexec(fd);
     return _open_osfhandle(fd, O_RDWR | O_BINARY);
@@ -248,7 +248,7 @@ int qemu_select(int nfds, fd_set *readfds, fd_set *writefds,
     }
     rc = select(nfds, p_readsds, p_writesds, p_exceptsds, timeout);
     if (rc < 0) {
-        return -socket_error();
+        return -WSAGetLastError();
     }
     if (readfds) {
         sdset_to_fdset(readfds, &readsds, &orig_readsds);

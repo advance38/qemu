@@ -102,9 +102,6 @@ size_t nbd_wr_sync(int fd, void *buffer, size_t size, bool do_read)
             len = write(fd, buffer + offset, size - offset);
         }
 
-        if (len == -1)
-            errno = socket_error();
-
         /* recoverable error */
         if (len == -1 && (errno == EAGAIN || errno == EINTR)) {
             continue;

@@ -71,15 +71,14 @@ static ssize_t net_socket_receive_dgram(VLANClientState *nc, const uint8_t *buf,
 static void net_socket_send(void *opaque)
 {
     NetSocketState *s = opaque;
-    int size, err;
+    int size;
     unsigned l;
     uint8_t buf1[4096];
     const uint8_t *buf;
 
     size = read(s->fd, buf1, sizeof(buf1));
     if (size < 0) {
-        err = socket_error();
-        if (err != EWOULDBLOCK)
+        if (errno != EWOULDBLOCK)
             goto eoc;
     } else if (size == 0) {
         /* end of connection */

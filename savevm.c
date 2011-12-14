@@ -197,10 +197,10 @@ static int socket_get_buffer(void *opaque, uint8_t *buf, int64_t pos, int size)
 
     do {
         len = read(s->fd, buf, size);
-    } while (len == -1 && socket_error() == EINTR);
+    } while (len == -1 && errno == EINTR);
 
     if (len == -1)
-        len = -socket_error();
+        len = -errno;
 
     return len;
 }
