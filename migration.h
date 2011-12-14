@@ -32,7 +32,6 @@ struct MigrationState
     int old_vm_running;
     int begin;
     int complete;
-    int (*get_error)(MigrationState *s);
     int (*close)(MigrationState *s);
     void *opaque;
     int blk;

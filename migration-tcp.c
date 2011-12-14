@@ -30,11 +30,6 @@
     do { } while (0)
 #endif
 
-static int socket_errno(MigrationState *s)
-{
-    return socket_error();
-}
-
 static int tcp_close(MigrationState *s)
 {
     int r = 0;
@@ -82,7 +77,6 @@ int tcp_start_outgoing_migration(MigrationState *s, const char *host_port)
         return ret;
     }
 
-    s->get_error = socket_errno;
     s->close = tcp_close;
 
     s->fd = qemu_socket(PF_INET, SOCK_STREAM, 0);

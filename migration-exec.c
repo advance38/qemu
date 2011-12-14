@@ -34,11 +34,6 @@
     do { } while (0)
 #endif
 
-static int file_errno(MigrationState *s)
-{
-    return errno;
-}
-
 static int exec_close(MigrationState *s)
 {
     int ret = 0;
@@ -74,7 +69,6 @@ int exec_start_outgoing_migration(MigrationState *s, const char *command)
     s->opaque = qemu_popen(f, "w");
 
     s->close = exec_close;
-    s->get_error = file_errno;
 
     migrate_fd_connect(s);
     return 0;

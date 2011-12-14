@@ -32,11 +32,6 @@
     do { } while (0)
 #endif
 
-static int fd_errno(MigrationState *s)
-{
-    return errno;
-}
-
 static int fd_close(MigrationState *s)
 {
     struct stat st;
@@ -76,7 +71,6 @@ int fd_start_outgoing_migration(MigrationState *s, const char *fdname)
         goto err_after_get_fd;
     }
 
-    s->get_error = fd_errno;
     s->close = fd_close;
 
     migrate_fd_connect(s);
