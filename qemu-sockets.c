@@ -139,12 +139,14 @@ int inet_listen_opts(QemuOpts *opts, int port_offset)
     }
 
     /* create socket + bind */
+    assert(res);
     for (e = res; e != NULL; e = e->ai_next) {
         getnameinfo((struct sockaddr*)e->ai_addr,e->ai_addrlen,
 		        uaddr,INET6_ADDRSTRLEN,uport,32,
 		        NI_NUMERICHOST | NI_NUMERICSERV);
         slisten = qemu_socket(e->ai_family, e->ai_socktype, e->ai_protocol);
         if (slisten < 0) {
+            rc = slisten;
             fprintf(stderr,"%s: socket(%s): %s\n", __FUNCTION__,
                     inet_strfamily(e->ai_family), strerror(errno));
             continue;
@@ -177,7 +179,7 @@ int inet_listen_opts(QemuOpts *opts, int port_offset)
     }
     fprintf(stderr, "%s: FAILED\n", __FUNCTION__);
     freeaddrinfo(res);
-    return -1;
+    return rc;
 
 listen:
     rc = qemu_listen(slisten, 1);
@@ -185,7 +187,7 @@ listen:
         perror("listen");
         qemu_close_socket(slisten);
         freeaddrinfo(res);
-        return rc;
+        return -1;
     }
     snprintf(uport, sizeof(uport), "%d", inet_getport(e) - port_offset);
     qemu_opt_set(opts, "host", uaddr);
@@ -229,6 +231,7 @@ int inet_connect_opts(QemuOpts *opts)
 	return -1;
     }
 
+    assert(res);
     for (e = res; e != NULL; e = e->ai_next) {
         if (getnameinfo((struct sockaddr*)e->ai_addr,e->ai_addrlen,
                             uaddr,INET6_ADDRSTRLEN,uport,32,
@@ -258,7 +261,7 @@ int inet_connect_opts(QemuOpts *opts)
         return sock;
     }
     freeaddrinfo(res);
-    return -1;
+    return rc;
 }
 
 int inet_dgram_opts(QemuOpts *opts)
@@ -322,6 +325,7 @@ int inet_dgram_opts(QemuOpts *opts)
     if (sock < 0) {
         fprintf(stderr,"%s: socket(%s): %s\n", __FUNCTION__,
                 inet_strfamily(peer->ai_family), strerror(errno));
+        rc = sock;
         goto err;
     }
     qemu_setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (void *)&on, sizeof(on));
@@ -331,6 +335,7 @@ int inet_dgram_opts(QemuOpts *opts)
                     uaddr,INET6_ADDRSTRLEN,uport,32,
                     NI_NUMERICHOST | NI_NUMERICSERV) != 0) {
         fprintf(stderr, "%s: getnameinfo: oops\n", __FUNCTION__);
+        rc = -EHOSTUNREACH;
         goto err;
     }
     rc = qemu_bind(sock, local->ai_addr, local->ai_addrlen);
@@ -346,6 +351,7 @@ int inet_dgram_opts(QemuOpts *opts)
                     uaddr, INET6_ADDRSTRLEN, uport, 32,
                     NI_NUMERICHOST | NI_NUMERICSERV) != 0) {
         fprintf(stderr, "%s: getnameinfo: oops\n", __FUNCTION__);
+        rc = -EHOSTUNREACH;
         goto err;
     }
     rc = qemu_connect(sock, peer->ai_addr, peer->ai_addrlen);
@@ -367,7 +373,7 @@ err:
         freeaddrinfo(local);
     if (peer)
         freeaddrinfo(peer);
-    return -1;
+    return -rc;
 }
 
 /* compatibility wrapper */
@@ -516,7 +522,7 @@ int unix_listen_opts(QemuOpts *opts)
 
 err:
     qemu_close_socket(sock);
-    return -1;
+    return rc;
 }
 
 int unix_connect_opts(QemuOpts *opts)

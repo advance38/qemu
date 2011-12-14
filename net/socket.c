@@ -426,14 +426,14 @@ static int net_socket_listen_init(VLANState *vlan,
         perror("bind");
         g_free(s);
         qemu_close_socket(fd);
-        return -1;
+        return ret;
     }
     ret = qemu_listen(fd, 0);
     if (ret < 0) {
         perror("listen");
         g_free(s);
         qemu_close_socket(fd);
-        return -1;
+        return ret;
     }
     s->vlan = vlan;
     s->model = g_strdup(model);
