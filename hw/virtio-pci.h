@@ -40,7 +40,7 @@ typedef struct {
     uint32_t nvectors;
     VirtIOBlkConf blk;
     uint32_t host_features;
-#ifdef CONFIG_LINUX
+#ifdef CONFIG_VIRTFS
     V9fsConf fsconf;
 #endif
     virtio_serial_conf serial;

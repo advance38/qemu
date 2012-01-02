@@ -20,7 +20,7 @@
 #include "sysemu.h"
 #include "block.h"
 #include "event_notifier.h"
-#ifdef CONFIG_LINUX
+#ifdef CONFIG_VIRTFS
 #include "9p.h"
 #endif
 
@@ -200,7 +200,7 @@ VirtIODevice *virtio_serial_init(DeviceState *dev, virtio_serial_conf *serial);
 VirtIODevice *virtio_balloon_init(DeviceState *dev);
 typedef struct VirtIOSCSIConf VirtIOSCSIConf;
 VirtIODevice *virtio_scsi_init(DeviceState *dev, VirtIOSCSIConf *conf);
-#ifdef CONFIG_LINUX
+#ifdef CONFIG_VIRTFS
 VirtIODevice *virtio_9p_init(DeviceState *dev, V9fsConf *conf);
 #endif
 
