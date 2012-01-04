@@ -266,6 +266,7 @@ int ram_save_live(Monitor *mon, QEMUFile *f, int stage, void *opaque)
     uint64_t bytes_transferred_last;
     double bwidth = 0;
     uint64_t expected_time = 0;
+    int pages_read = 0;
     int ret;
 
     if (stage < 0) {
@@ -312,6 +313,10 @@ int ram_save_live(Monitor *mon, QEMUFile *f, int stage, void *opaque)
         bytes_sent = ram_save_block(f);
         bytes_transferred += bytes_sent;
         if (bytes_sent == 0) { /* no more blocks */
+            break;
+        }
+        if ((++pages_read & 0xff) == 0 &&
+            qemu_get_clock_ns(rt_clock) - bwidth > migrate_max_downtime()) {
             break;
         }
     }
