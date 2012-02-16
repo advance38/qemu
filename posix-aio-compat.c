@@ -51,7 +51,7 @@ struct qemu_paiocb {
     QTAILQ_ENTRY(qemu_paiocb) node;
     int aio_type;
     ssize_t ret;
-    int active;
+    int queued;
     struct qemu_paiocb *next;
 };
 
@@ -329,7 +329,7 @@ static void *aio_thread(void *unused)
         mutex_lock(&lock);
         aiocb = QTAILQ_FIRST(&request_list);
         QTAILQ_REMOVE(&request_list, aiocb, node);
-        aiocb->active = 1;
+        aiocb->queued = 0;
         mutex_unlock(&lock);
 
         switch (aiocb->aio_type & QEMU_AIO_TYPE_MASK) {
@@ -422,7 +422,7 @@ static void spawn_thread(void)
 static void qemu_paio_submit(struct qemu_paiocb *aiocb)
 {
     aiocb->ret = -EINPROGRESS;
-    aiocb->active = 0;
+    aiocb->queued = 1;
     mutex_lock(&lock);
     QTAILQ_INSERT_TAIL(&request_list, aiocb, node);
     mutex_unlock(&lock);
@@ -570,20 +570,20 @@ static void paio_remove(struct qemu_paiocb *acb)
 static void paio_cancel(BlockDriverAIOCB *blockacb)
 {
     struct qemu_paiocb *acb = (struct qemu_paiocb *)blockacb;
-    int active = 0;
+    int queued = 1;
 
     trace_paio_cancel(acb, acb->common.opaque);
 
     mutex_lock(&lock);
-    if (!acb->active && qemu_sem_timedwait(&sem, 0) == 0) {
+    if (acb->queued && qemu_sem_timedwait(&sem, 0) == 0) {
         QTAILQ_REMOVE(&request_list, acb, node);
         acb->ret = -ECANCELED;
     } else if (acb->ret == -EINPROGRESS) {
-        active = 1;
+        queued = 0;
     }
     mutex_unlock(&lock);
 
-    if (active) {
+    if (queued) {
         /* fail safe: if the aio could not be canceled, we wait for
            it */
         while (qemu_paio_error(acb) == EINPROGRESS)
