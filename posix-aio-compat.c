@@ -50,7 +50,7 @@ struct qemu_paiocb {
 #define aio_ioctl_cmd   aio_nbytes /* for QEMU_AIO_IOCTL */
     off_t aio_offset;
 
-    QTAILQ_ENTRY(qemu_paiocb) node;
+    QSIMPLEQ_ENTRY(qemu_paiocb) node;
     int aio_type;
     ssize_t ret;
     int queued;
@@ -73,7 +73,7 @@ static int idle_threads = 0;
 static int new_threads = 0;     /* backlog of threads we need to create */
 static int pending_threads = 0; /* threads created but not running yet */
 static QEMUBH *new_thread_bh;
-static QTAILQ_HEAD(, qemu_paiocb) request_list;
+static QSIMPLEQ_HEAD(, qemu_paiocb) request_list;
 static pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef CONFIG_PREADV
@@ -330,8 +330,8 @@ static void *aio_thread(void *unused)
         }
 
         mutex_lock(&queue_lock);
-        aiocb = QTAILQ_FIRST(&request_list);
-        QTAILQ_REMOVE(&request_list, aiocb, node);
+        aiocb = QSIMPLEQ_FIRST(&request_list);
+        QSIMPLEQ_REMOVE_HEAD(&request_list, node);
         mutex_unlock(&queue_lock);
 
         ret = atomic_xchg(&aiocb->ret, -EINPROGRESS);
@@ -431,7 +431,7 @@ static void qemu_paio_submit(struct qemu_paiocb *aiocb)
     aiocb->ret = -ENOTSTARTED;
     aiocb->queued = 1;
     mutex_lock(&queue_lock);
-    QTAILQ_INSERT_TAIL(&request_list, aiocb, node);
+    QSIMPLEQ_INSERT_TAIL(&request_list, aiocb, node);
     mutex_unlock(&queue_lock);
     qemu_sem_post(&sem);
 
@@ -666,7 +666,7 @@ int paio_init(void)
     if (ret)
         die2(ret, "pthread_attr_setdetachstate");
 
-    QTAILQ_INIT(&request_list);
+    QSIMPLEQ_INIT(&request_list);
     new_thread_bh = qemu_bh_new(spawn_thread_bh_fn, NULL);
 
     posix_aio_state = s;
