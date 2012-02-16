@@ -74,6 +74,7 @@ static int new_threads = 0;     /* backlog of threads we need to create */
 static int pending_threads = 0; /* threads created but not running yet */
 static QEMUBH *new_thread_bh;
 static QTAILQ_HEAD(, qemu_paiocb) request_list;
+static pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef CONFIG_PREADV
 static int preadv_present = 1;
@@ -328,10 +329,10 @@ static void *aio_thread(void *unused)
             atomic_inc(&cur_threads);
         }
 
-        mutex_lock(&lock);
+        mutex_lock(&queue_lock);
         aiocb = QTAILQ_FIRST(&request_list);
         QTAILQ_REMOVE(&request_list, aiocb, node);
-        mutex_unlock(&lock);
+        mutex_unlock(&queue_lock);
 
         ret = atomic_xchg(&aiocb->ret, -EINPROGRESS);
         atomic_mb_set(&aiocb->queued, 0);
@@ -429,9 +430,9 @@ static void qemu_paio_submit(struct qemu_paiocb *aiocb)
 {
     aiocb->ret = -ENOTSTARTED;
     aiocb->queued = 1;
-    mutex_lock(&lock);
+    mutex_lock(&queue_lock);
     QTAILQ_INSERT_TAIL(&request_list, aiocb, node);
-    mutex_unlock(&lock);
+    mutex_unlock(&queue_lock);
     qemu_sem_post(&sem);
 
     if (atomic_read(&idle_threads) == 0 &&
