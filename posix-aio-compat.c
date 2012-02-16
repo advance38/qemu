@@ -34,6 +34,8 @@
 
 #include "block/raw-posix-aio.h"
 
+#define ENOTSTARTED 8
+
 static void do_spawn_thread(void);
 
 struct qemu_paiocb {
@@ -329,8 +331,15 @@ static void *aio_thread(void *unused)
         mutex_lock(&lock);
         aiocb = QTAILQ_FIRST(&request_list);
         QTAILQ_REMOVE(&request_list, aiocb, node);
-        aiocb->queued = 0;
         mutex_unlock(&lock);
+
+        ret = atomic_xchg(&aiocb->ret, -EINPROGRESS);
+        atomic_mb_set(&aiocb->queued, 0);
+        if (ret == ECANCELED) {
+            atomic_mb_set(&aiocb->ret, -ECANCELED);
+            posix_aio_notify_event();
+            continue;
+        }
 
         switch (aiocb->aio_type & QEMU_AIO_TYPE_MASK) {
         case QEMU_AIO_READ:
@@ -362,10 +371,7 @@ static void *aio_thread(void *unused)
             break;
         }
 
-        mutex_lock(&lock);
-        aiocb->ret = ret;
-        mutex_unlock(&lock);
-
+        atomic_set(&aiocb->ret, ret);
         posix_aio_notify_event();
     }
 
@@ -421,7 +427,7 @@ static void spawn_thread(void)
 
 static void qemu_paio_submit(struct qemu_paiocb *aiocb)
 {
-    aiocb->ret = -EINPROGRESS;
+    aiocb->ret = -ENOTSTARTED;
     aiocb->queued = 1;
     mutex_lock(&lock);
     QTAILQ_INSERT_TAIL(&request_list, aiocb, node);
@@ -437,13 +443,7 @@ static void qemu_paio_submit(struct qemu_paiocb *aiocb)
 
 static ssize_t qemu_paio_return(struct qemu_paiocb *aiocb)
 {
-    ssize_t ret;
-
-    mutex_lock(&lock);
-    ret = aiocb->ret;
-    mutex_unlock(&lock);
-
-    return ret;
+    return atomic_read(&aiocb->ret);
 }
 
 static int qemu_paio_error(struct qemu_paiocb *aiocb)
@@ -471,6 +471,12 @@ static int posix_aio_process_queue(void *opaque)
             acb = *pacb;
             if (!acb)
                 return result;
+
+            if (atomic_read(&acb->queued) == 1) {
+                /* Still in the request_list.  */
+                pacb = &acb->next;
+                continue;
+            }
 
             ret = qemu_paio_error(acb);
             if (ret == ECANCELED) {
@@ -548,49 +554,29 @@ static void posix_aio_notify_event(void)
         die("write()");
 }
 
-static void paio_remove(struct qemu_paiocb *acb)
-{
-    struct qemu_paiocb **pacb;
-
-    /* remove the callback from the queue */
-    pacb = &posix_aio_state->first_aio;
-    for(;;) {
-        if (*pacb == NULL) {
-            fprintf(stderr, "paio_remove: aio request not found!\n");
-            break;
-        } else if (*pacb == acb) {
-            *pacb = acb->next;
-            qemu_aio_release(acb);
-            break;
-        }
-        pacb = &(*pacb)->next;
-    }
-}
-
 static void paio_cancel(BlockDriverAIOCB *blockacb)
 {
     struct qemu_paiocb *acb = (struct qemu_paiocb *)blockacb;
-    int queued = 1;
-
     trace_paio_cancel(acb, acb->common.opaque);
 
-    mutex_lock(&lock);
-    if (acb->queued && qemu_sem_timedwait(&sem, 0) == 0) {
-        QTAILQ_REMOVE(&request_list, acb, node);
-        acb->ret = -ECANCELED;
-    } else if (acb->ret == -EINPROGRESS) {
-        queued = 0;
-    }
-    mutex_unlock(&lock);
-
-    if (queued) {
-        /* fail safe: if the aio could not be canceled, we wait for
-           it */
-        while (qemu_paio_error(acb) == EINPROGRESS)
-            ;
+    if (atomic_cmpxchg(&acb->ret, -ENOTSTARTED, -ECANCELED) == -ENOTSTARTED) {
+        /*
+	 * ENOTSTARTED implies acb->queued == 1, so the aio thread will
+	 * notice our cancellation after switching to EINPROGRESS,
+	 * put ECANCELED back and call posix_aio_notify_event to
+	 * free the AIOCB.
+	 */
+        return;
     }
 
-    paio_remove(acb);
+    /*
+     * We know that acb->queued == 0 because acb->ret was not ENOTSTARTED.
+     * The only exception is if another thread has already canceled
+     * and we have acb->ret == -ECANCELED, acb->queued == 1.  That is
+     * fine, too.
+     */
+    while (qemu_paio_error(acb) == EINPROGRESS)
+        ;
 }
 
 static AIOPool raw_aio_pool = {
