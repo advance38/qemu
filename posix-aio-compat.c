@@ -73,7 +73,8 @@ static int idle_threads = 0;
 static int new_threads = 0;     /* backlog of threads we need to create */
 static int pending_threads = 0; /* threads created but not running yet */
 static QEMUBH *new_thread_bh;
-static QSIMPLEQ_HEAD(, qemu_paiocb) request_list;
+static QSIMPLEQ_HEAD(, qemu_paiocb) request_list =
+    QSIMPLEQ_HEAD_INITIALIZER(request_list);
 static pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
 
 #ifdef CONFIG_PREADV
@@ -302,6 +303,29 @@ static ssize_t handle_aiocb_rw(struct qemu_paiocb *aiocb)
 
 static void posix_aio_notify_event(void);
 
+static struct qemu_paiocb *paio_dequeue(void)
+{
+    struct qemu_paiocb *dummy, *acb;
+
+    /* We always keep a dummy node at the head of the queue.  Each node
+     * start acting as dummy node as soon as it is removed, so we remove
+     * the first node and return the _new_ first node.
+     *
+     * Excluding the empty case thanks to the semaphore, the queue will
+     * always have at least two nodes (the dummy node, and the one
+     * being removed).  So we do not need to update the tail pointer!
+     */
+    dummy = QSIMPLEQ_FIRST(&request_list);
+    QSIMPLEQ_REMOVE_HEAD(&request_list, node);
+
+    acb = QSIMPLEQ_NEXT(dummy, node);
+    qemu_aio_release(dummy);
+
+    /* acb is the new dummy node.  */
+    qemu_aio_ref(acb);
+    return acb;
+}
+
 static void *aio_thread(void *unused)
 {
     mutex_lock(&lock);
@@ -330,8 +354,7 @@ static void *aio_thread(void *unused)
         }
 
         mutex_lock(&queue_lock);
-        aiocb = QSIMPLEQ_FIRST(&request_list);
-        QSIMPLEQ_REMOVE_HEAD(&request_list, node);
+        aiocb = paio_dequeue();
         mutex_unlock(&queue_lock);
 
         ret = atomic_xchg(&aiocb->ret, -EINPROGRESS);
@@ -430,9 +453,7 @@ static void qemu_paio_submit(struct qemu_paiocb *aiocb)
 {
     aiocb->ret = -ENOTSTARTED;
     aiocb->queued = 1;
-    mutex_lock(&queue_lock);
-    QSIMPLEQ_INSERT_TAIL(&request_list, aiocb, node);
-    mutex_unlock(&queue_lock);
+    QSIMPLEQ_INSERT_TAIL_ATOMIC(&request_list, aiocb, node);
     qemu_sem_post(&sem);
 
     if (atomic_read(&idle_threads) == 0 &&
@@ -633,6 +654,7 @@ BlockDriverAIOCB *paio_ioctl(BlockDriverState *bs, int fd,
 int paio_init(void)
 {
     PosixAioState *s;
+    struct qemu_paiocb *acb;
     int fds[2];
     int ret;
 
@@ -640,6 +662,10 @@ int paio_init(void)
         return 0;
 
     s = g_malloc(sizeof(PosixAioState));
+
+    /* Insert a dummy node in the request list; see paio_dequeue.  */
+    acb = qemu_aio_get(&raw_aio_pool, NULL, NULL, NULL);
+    QSIMPLEQ_INSERT_TAIL(&request_list, acb, node);
 
     s->first_aio = NULL;
     if (qemu_pipe(fds) == -1) {
@@ -666,7 +692,6 @@ int paio_init(void)
     if (ret)
         die2(ret, "pthread_attr_setdetachstate");
 
-    QSIMPLEQ_INIT(&request_list);
     new_thread_bh = qemu_bh_new(spawn_thread_bh_fn, NULL);
 
     posix_aio_state = s;
