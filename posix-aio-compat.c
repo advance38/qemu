@@ -25,6 +25,7 @@
 
 #include "qemu-queue.h"
 #include "qemu-thread.h"
+#include "qemu/atomic.h"
 #include "osdep.h"
 #include "sysemu.h"
 #include "qemu-common.h"
@@ -309,20 +310,23 @@ static void *aio_thread(void *unused)
         struct qemu_paiocb *aiocb;
         ssize_t ret;
 
-        mutex_lock(&lock);
-        idle_threads++;
-        mutex_unlock(&lock);
+        atomic_inc(&idle_threads);
         ret = qemu_sem_timedwait(&sem, 10000);
-        mutex_lock(&lock);
-        idle_threads--;
+        atomic_dec(&idle_threads);
         if (ret == -1) {
-            if (QTAILQ_EMPTY(&request_list)) {
+            atomic_dec(&cur_threads);
+            /*
+             * There is a small window in which a producer could have
+             * thought of this thread as an idle thread, so check for
+             * more work.
+             */
+            if (qemu_sem_timedwait(&sem, 0) == -1) {
                 break;
             }
-            mutex_unlock(&lock);
-            continue;
+            atomic_inc(&cur_threads);
         }
 
+        mutex_lock(&lock);
         aiocb = QTAILQ_FIRST(&request_list);
         QTAILQ_REMOVE(&request_list, aiocb, node);
         aiocb->active = 1;
@@ -365,9 +369,6 @@ static void *aio_thread(void *unused)
         posix_aio_notify_event();
     }
 
-    cur_threads--;
-    mutex_unlock(&lock);
-
     return NULL;
 }
 
@@ -402,7 +403,8 @@ static void spawn_thread_bh_fn(void *opaque)
 
 static void spawn_thread(void)
 {
-    cur_threads++;
+    atomic_inc(&cur_threads);
+    mutex_lock(&lock);
     new_threads++;
     /* If there are threads being created, they will spawn new workers, so
      * we don't spend time creating many threads in a loop holding a mutex or
@@ -414,6 +416,7 @@ static void spawn_thread(void)
     if (!pending_threads) {
         qemu_bh_schedule(new_thread_bh);
     }
+    mutex_unlock(&lock);
 }
 
 static void qemu_paio_submit(struct qemu_paiocb *aiocb)
@@ -421,11 +424,15 @@ static void qemu_paio_submit(struct qemu_paiocb *aiocb)
     aiocb->ret = -EINPROGRESS;
     aiocb->active = 0;
     mutex_lock(&lock);
-    if (idle_threads == 0 && cur_threads < max_threads)
-        spawn_thread();
     QTAILQ_INSERT_TAIL(&request_list, aiocb, node);
     mutex_unlock(&lock);
     qemu_sem_post(&sem);
+
+    if (atomic_read(&idle_threads) == 0 &&
+        atomic_read(&cur_threads) < max_threads) {
+        spawn_thread();
+    }
+
 }
 
 static ssize_t qemu_paio_return(struct qemu_paiocb *aiocb)
