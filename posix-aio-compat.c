@@ -478,7 +478,9 @@ static int posix_aio_process_queue(void *opaque)
                 *pacb = acb->next;
                 qemu_aio_release(acb);
                 result = 1;
-            } else if (ret != EINPROGRESS) {
+                continue;
+            }
+            if (ret != EINPROGRESS) {
                 /* end of aio */
                 if (ret == 0) {
                     ret = qemu_paio_return(acb);
@@ -499,9 +501,9 @@ static int posix_aio_process_queue(void *opaque)
                 qemu_aio_release(acb);
                 result = 1;
                 break;
-            } else {
-                pacb = &acb->next;
             }
+
+            pacb = &acb->next;
         }
     }
 
