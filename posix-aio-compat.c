@@ -24,6 +24,7 @@
 #include <stdio.h>
 
 #include "qemu-queue.h"
+#include "qemu-thread.h"
 #include "osdep.h"
 #include "sysemu.h"
 #include "qemu-common.h"
@@ -60,7 +61,7 @@ typedef struct PosixAioState {
 
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+static QemuSemaphore sem;
 static pthread_t thread_id;
 static pthread_attr_t attr;
 static int max_threads = 64;
@@ -98,20 +99,6 @@ static void mutex_unlock(pthread_mutex_t *mutex)
 {
     int ret = pthread_mutex_unlock(mutex);
     if (ret) die2(ret, "pthread_mutex_unlock");
-}
-
-static int cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
-                           struct timespec *ts)
-{
-    int ret = pthread_cond_timedwait(cond, mutex, ts);
-    if (ret && ret != ETIMEDOUT) die2(ret, "pthread_cond_timedwait");
-    return ret;
-}
-
-static void cond_signal(pthread_cond_t *cond)
-{
-    int ret = pthread_cond_signal(cond);
-    if (ret) die2(ret, "pthread_cond_signal");
 }
 
 static void thread_create(pthread_t *thread, pthread_attr_t *attr,
@@ -320,25 +307,21 @@ static void *aio_thread(void *unused)
 
     while (1) {
         struct qemu_paiocb *aiocb;
-        ssize_t ret = 0;
-        qemu_timeval tv;
-        struct timespec ts;
-
-        qemu_gettimeofday(&tv);
-        ts.tv_sec = tv.tv_sec + 10;
-        ts.tv_nsec = 0;
+        ssize_t ret;
 
         mutex_lock(&lock);
-
-        while (QTAILQ_EMPTY(&request_list) &&
-               !(ret == ETIMEDOUT)) {
-            idle_threads++;
-            ret = cond_timedwait(&cond, &lock, &ts);
-            idle_threads--;
+        idle_threads++;
+        mutex_unlock(&lock);
+        ret = qemu_sem_timedwait(&sem, 10000);
+        mutex_lock(&lock);
+        idle_threads--;
+        if (ret == -1) {
+            if (QTAILQ_EMPTY(&request_list)) {
+                break;
+            }
+            mutex_unlock(&lock);
+            continue;
         }
-
-        if (QTAILQ_EMPTY(&request_list))
-            break;
 
         aiocb = QTAILQ_FIRST(&request_list);
         QTAILQ_REMOVE(&request_list, aiocb, node);
@@ -442,7 +425,7 @@ static void qemu_paio_submit(struct qemu_paiocb *aiocb)
         spawn_thread();
     QTAILQ_INSERT_TAIL(&request_list, aiocb, node);
     mutex_unlock(&lock);
-    cond_signal(&cond);
+    qemu_sem_post(&sem);
 }
 
 static ssize_t qemu_paio_return(struct qemu_paiocb *aiocb)
@@ -583,7 +566,7 @@ static void paio_cancel(BlockDriverAIOCB *blockacb)
     trace_paio_cancel(acb, acb->common.opaque);
 
     mutex_lock(&lock);
-    if (!acb->active) {
+    if (!acb->active && qemu_sem_timedwait(&sem, 0) == 0) {
         QTAILQ_REMOVE(&request_list, acb, node);
         acb->ret = -ECANCELED;
     } else if (acb->ret == -EINPROGRESS) {
@@ -675,6 +658,7 @@ int paio_init(void)
     fcntl(s->rfd, F_SETFL, O_NONBLOCK);
     fcntl(s->wfd, F_SETFL, O_NONBLOCK);
 
+    qemu_sem_init(&sem, 0);
     qemu_aio_set_fd_handler(s->rfd, posix_aio_read, NULL, posix_aio_flush,
         posix_aio_process_queue, s);
 
