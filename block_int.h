@@ -309,6 +309,7 @@ struct BlockDriverState {
 
 struct BlockDriverAIOCB {
     AIOPool *pool;
+    int refcount;
     BlockDriverState *bs;
     BlockDriverCompletionFunc *cb;
     void *opaque;
@@ -319,6 +320,7 @@ void get_tmp_filename(char *filename, int size);
 
 void *qemu_aio_get(AIOPool *pool, BlockDriverState *bs,
                    BlockDriverCompletionFunc *cb, void *opaque);
+void qemu_aio_ref(void *p);
 void qemu_aio_release(void *p);
 
 void bdrv_set_io_limits(BlockDriverState *bs,
