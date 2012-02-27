@@ -21,16 +21,20 @@
 /* The ID for virtio_scsi */
 #define VIRTIO_ID_SCSI  8
 
-struct VirtIOSCSIConf {
+typedef struct VirtIOSCSIConf {
     uint32_t num_queues;
     uint32_t max_sectors;
     uint32_t cmd_per_lun;
-};
+} VirtIOSCSIConf;
 
 #define DEFINE_VIRTIO_SCSI_PROPERTIES(_state, _features_field, _conf_field) \
     DEFINE_VIRTIO_COMMON_FEATURES(_state, _features_field), \
     DEFINE_PROP_UINT32("num_queues", _state, _conf_field.num_queues, 1), \
     DEFINE_PROP_UINT32("max_sectors", _state, _conf_field.max_sectors, 0xFFFF), \
     DEFINE_PROP_UINT32("cmd_per_lun", _state, _conf_field.cmd_per_lun, 128)
+
+/* Base devices.  */
+VirtIODevice *virtio_scsi_init(DeviceState *dev, VirtIOSCSIConf *conf);
+void virtio_scsi_exit(VirtIODevice *vdev);
 
 #endif /* _QEMU_VIRTIO_SCSI_H */
