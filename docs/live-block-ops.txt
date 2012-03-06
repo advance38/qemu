@@ -57,8 +57,15 @@ reports something like
 
   Type mirror, device virtio0: Completed 1048576000 of 1048576000 bytes
 
-Right now there is no command to start writing to the destination
-only.  However, the following commands are guaranteed to leave the
+It is possible to switch to the destination using
+
+(qemu) drive_reopen virtio0 /new-path/disk.img
+
+This assumes that all images A/B/C are also present under /new-path
+or.  An image can be omitted from the destination if one of the images
+refers to its backing file using an absolute path.
+
+In addition, the following commands are guaranteed to leave the
 source and target synchronized:
 
 - quit
@@ -88,6 +95,4 @@ You can also use mirroring with the -f option:
 
 In this case it is also possible to use raw as the format of the
 destination image.  Converting an image to raw will properly support
-thin provisioning.  However, be aware that right now mirroring cannot
-be stopped except by terminating QEMU or unplugging the device.
-
+thin provisioning.

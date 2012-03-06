@@ -659,6 +659,89 @@ void do_commit(Monitor *mon, const QDict *qdict)
     }
 }
 
+static void change_blockdev_image(BlockDriverState *bs, const char *new_image_file,
+                                  const char *format, Error **errp)
+{
+    BlockDriver *old_drv, *proto_drv;
+    BlockDriver *drv = NULL;
+    int ret = 0;
+    int flags;
+    char old_filename[1024];
+
+    if (bdrv_in_use(bs)) {
+        error_set(errp, QERR_DEVICE_IN_USE, bs->device_name);
+        return;
+    }
+
+    pstrcpy(old_filename, sizeof(old_filename), bs->filename);
+
+    old_drv = bs->drv;
+    flags = bs->open_flags;
+
+    if (format) {
+        drv = bdrv_find_whitelisted_format(format);
+        if (!drv) {
+            error_set(errp, QERR_INVALID_BLOCK_FORMAT, format);
+            return;
+        }
+    }
+
+    proto_drv = bdrv_find_protocol(new_image_file);
+    if (!proto_drv) {
+        error_set(errp, QERR_INVALID_BLOCK_FORMAT, format);
+        return;
+    }
+
+    bdrv_drain_all();
+    if (!bdrv_is_read_only(bs) && bdrv_is_inserted(bs)) {
+        if (bdrv_flush(bs)) {
+            error_set(errp, QERR_IO_ERROR);
+            return;
+        }
+    }
+
+    bdrv_close(bs);
+    ret = bdrv_open(bs, new_image_file, flags, drv);
+    /*
+     * If reopening the image file we just created fails, fall back
+     * and try to re-open the original image. If that fails too, we
+     * are in serious trouble.
+     */
+    if (ret != 0) {
+        ret = bdrv_open(bs, old_filename, flags, old_drv);
+        if (ret != 0) {
+            error_set(errp, QERR_OPEN_FILE_FAILED, old_filename);
+        } else {
+            error_set(errp, QERR_OPEN_FILE_FAILED, new_image_file);
+        }
+    }
+}
+
+void qmp_drive_reopen(const char *device, const char *new_image_file,
+                      bool has_format, const char *format, Error **errp)
+{
+    BlockDriverState *bs;
+
+    bs = bdrv_find(device);
+    if (!bs) {
+        error_set(errp, QERR_DEVICE_NOT_FOUND, device);
+        return;
+    }
+    if (bs->job) {
+        int ret = block_job_cancel_sync(bs->job);
+
+        /* Do not complete the switch if the job had an I/O error
+         * or was canceled (i.e. the target was not synchronized
+         * completely).
+         */
+        if (ret != 0) {
+            error_set(errp, QERR_DEVICE_IN_USE, device);
+        }
+    }
+    change_blockdev_image(bs, new_image_file,
+                          has_format ? format : NULL, errp);
+}
+
 static void blockdev_do_action(int kind, void *data, Error **errp)
 {
     BlockdevAction action;

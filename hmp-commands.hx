@@ -922,6 +922,22 @@ using the specified target.
 ETEXI
 
     {
+        .name       = "drive_reopen",
+        .args_type  = "device:B,new-image-file:s,format:s?",
+        .params     = "device new-image-file [format]",
+        .help       = "Assigns a new image file to a device. The image\n\t\t\t"
+                      "will be opened using the format specified, or\n\t\t\t"
+                      "probed for known formats if it is omitted.\n\t\t\t",
+        .mhandler.cmd = hmp_drive_reopen,
+    },
+
+STEXI
+@item drive_reopen
+@findex drive_reopen
+Assigns a new image file to a device.
+ETEXI
+
+    {
         .name       = "drive_add",
         .args_type  = "pci_addr:s,opts:s",
         .params     = "[[<domain>:]<bus>:]<slot>\n"
