@@ -831,7 +831,7 @@ EQMP
 
     {
         .name       = "drive-reopen",
-        .args_type  = "device:B,new-image-file:s,format:s?",
+        .args_type  = "device:B,new-image-file:s,format:s?,witness:s?",
         .mhandler.cmd_new = qmp_marshal_input_drive_reopen,
     },
 
@@ -844,11 +844,21 @@ guest is expecting the drive to change its content, the new image should
 contain the same data of the current one.  One use case is to terminate
 a drive-mirror command.
 
+The command can optionally write a single byte to a file descriptor name
+that was passed via SCM rights (getfd).  QEMU will write a single byte
+to this file descriptor before completing the command successfully.
+If the byte is not written to the file, it is guaranteed that the
+guest has not issued any I/O to the new image.  Failure to write the
+byte is fatal just like failure to open the new image, and will cause
+the guest to revert to the currently open file.
+
+
 Arguments:
 
 - "device": device name to operate on (json-string)
 - "new-image-file": name of new image file (json-string)
 - "format": format of new image (json-string, optional)
+- "witness": file descriptor previously passed via SCM rights (json-string, optional)
 
 Example:
 

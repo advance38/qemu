@@ -747,7 +747,7 @@ void hmp_drive_reopen(Monitor *mon, const QDict *qdict)
     const char *format = qdict_get_try_str(qdict, "format");
     Error *errp = NULL;
 
-    qmp_drive_reopen(device, filename, !!format, format, &errp);
+    qmp_drive_reopen(device, filename, !!format, format, false, NULL, &errp);
     hmp_handle_error(mon, &errp);
 }
 
