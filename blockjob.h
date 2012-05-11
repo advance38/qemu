@@ -46,6 +46,12 @@ typedef struct BlockJobType {
     void (*iostatus_reset)(BlockJob *job);
 
     /**
+     * Optional callback for job types that can fill the target member
+     * of BlockJobInfo.
+     */
+    void (*query)(BlockJob *job, BlockJobInfo *info);
+
+    /**
      * Optional callback for job types whose completion must be triggered
      * manually.
      */
