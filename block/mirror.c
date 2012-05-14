@@ -481,6 +481,16 @@ static void mirror_iostatus_reset(BlockJob *job)
     bdrv_iostatus_reset(s->target);
 }
 
+static void mirror_query(BlockJob *job, BlockJobInfo *info)
+{
+    MirrorBlockJob *s = container_of(job, MirrorBlockJob, common);
+
+    info->has_target = true;
+    info->target = g_new0(BlockJobTargetInfo, 1);
+    info->target->info = bdrv_query_info(s->target);
+    info->target->stats = bdrv_query_stats(s->target);
+}
+
 static void mirror_complete(BlockJob *job, Error **errp)
 {
     MirrorBlockJob *s = container_of(job, MirrorBlockJob, common);
@@ -508,6 +518,7 @@ static BlockJobType mirror_job_type = {
     .job_type      = "mirror",
     .set_speed     = mirror_set_speed,
     .iostatus_reset= mirror_iostatus_reset,
+    .query         = mirror_query,
     .complete      = mirror_complete,
 };
 

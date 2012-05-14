@@ -568,6 +568,8 @@ new_state = "1"
                     result = self.vm.qmp('query-block-jobs')
                     self.assert_qmp(result, 'return[0]/paused', True)
                     self.assert_qmp(result, 'return[0]/io-status', 'failed')
+                    self.assert_qmp(result,
+                                    'return[0]/target/info/io-status', 'failed')
 
                     result = self.vm.qmp('block-job-resume', device='drive0')
                     self.assert_qmp(result, 'return', {})
@@ -575,6 +577,8 @@ new_state = "1"
                     result = self.vm.qmp('query-block-jobs')
                     self.assert_qmp(result, 'return[0]/paused', False)
                     self.assert_qmp(result, 'return[0]/io-status', 'ok')
+                    self.assert_qmp(result,
+                                    'return[0]/target/info/io-status', 'ok')
                     error = True
                 elif event['event'] == 'BLOCK_JOB_READY':
                     self.assertTrue(error, 'job completed unexpectedly')
