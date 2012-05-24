@@ -234,11 +234,6 @@ static int raw_open_common(BlockDriverState *bs, const char *filename,
         }
     }
 
-    /* We're falling back to POSIX AIO in some cases so init always */
-    if (paio_init() < 0) {
-        goto out_free_buf;
-    }
-
 #ifdef CONFIG_LINUX_AIO
     /*
      * Currently Linux do AIO only for files opened with O_DIRECT
