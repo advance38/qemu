@@ -29,7 +29,7 @@
 #include "module.h"
 #include "trace.h"
 #include "thread-pool.h"
-#include "block/raw-posix-aio.h"
+#include "block/raw-aio.h"
 
 #if defined(__APPLE__) && (__MACH__)
 #include <paths.h>
