@@ -27,7 +27,9 @@
 #include "qemu-log.h"
 #include "block_int.h"
 #include "module.h"
-#include "block/raw-posix-aio.h"
+#include "trace.h"
+#include "thread-pool.h"
+#include "block/raw-aio.h"
 
 #if defined(__APPLE__) && (__MACH__)
 #include <paths.h>
@@ -52,6 +54,7 @@
 #include <sys/param.h>
 #include <linux/cdrom.h>
 #include <linux/fd.h>
+#include <linux/fs.h>
 #endif
 #if defined (__FreeBSD__) || defined(__FreeBSD_kernel__)
 #include <sys/disk.h>
@@ -74,10 +77,6 @@
 #ifdef __DragonFly__
 #include <sys/ioctl.h>
 #include <sys/diskslice.h>
-#endif
-
-#ifdef CONFIG_XFS
-#include <xfs/xfs.h>
 #endif
 
 //#define DEBUG_FLOPPY
@@ -131,13 +130,25 @@ typedef struct BDRVRawState {
 #endif
     uint8_t *aligned_buf;
     unsigned aligned_buf_size;
-#ifdef CONFIG_XFS
-    bool is_xfs : 1;
-#endif
+    bool has_discard : 1;
 } BDRVRawState;
 
 static int fd_open(BlockDriverState *bs);
 static int64_t raw_getlength(BlockDriverState *bs);
+
+struct qemu_paiocb {
+    BlockDriverState *bs;
+    int aio_fildes;
+    union {
+        struct iovec *aio_iov;
+        void *aio_ioctl_buf;
+    };
+    int aio_niov;
+    size_t aio_nbytes;
+#define aio_ioctl_cmd   aio_nbytes /* for QEMU_AIO_IOCTL */
+    off_t aio_offset;
+    int aio_type;
+};
 
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 static int cdrom_reopen(BlockDriverState *bs);
@@ -230,11 +241,6 @@ static int raw_open_common(BlockDriverState *bs, const char *filename,
         }
     }
 
-    /* We're falling back to POSIX AIO in some cases so init always */
-    if (paio_init() < 0) {
-        goto out_free_buf;
-    }
-
 #ifdef CONFIG_LINUX_AIO
     /*
      * Currently Linux do AIO only for files opened with O_DIRECT
@@ -256,12 +262,7 @@ static int raw_open_common(BlockDriverState *bs, const char *filename,
 #endif
     }
 
-#ifdef CONFIG_XFS
-    if (platform_test_xfs_fd(s->fd)) {
-        s->is_xfs = 1;
-    }
-#endif
-
+    s->has_discard = 1;
     return 0;
 
 out_free_buf:
@@ -310,6 +311,323 @@ static int qiov_is_aligned(BlockDriverState *bs, QEMUIOVector *qiov)
     }
 
     return 1;
+}
+
+static ssize_t handle_aiocb_ioctl(struct qemu_paiocb *aiocb)
+{
+    int ret;
+
+    ret = ioctl(aiocb->aio_fildes, aiocb->aio_ioctl_cmd, aiocb->aio_ioctl_buf);
+    if (ret == -1)
+        return -errno;
+
+    /*
+     * This looks weird, but the aio code only considers a request
+     * successful if it has written the full number of bytes.
+     *
+     * Now we overload aio_nbytes as aio_ioctl_cmd for the ioctl command,
+     * so in fact we return the ioctl command here to make posix_aio_read()
+     * happy..
+     */
+    return aiocb->aio_nbytes;
+}
+
+static ssize_t handle_aiocb_flush(struct qemu_paiocb *aiocb)
+{
+    int ret;
+
+    ret = qemu_fdatasync(aiocb->aio_fildes);
+    if (ret == -1)
+        return -errno;
+    return 0;
+}
+
+static ssize_t handle_aiocb_discard(struct qemu_paiocb *aiocb)
+{
+    BDRVRawState *s = aiocb->bs->opaque;
+    int retval;
+
+    if (s->has_discard == 0) {
+        return 0;
+    }
+
+    if (aiocb->aio_type & QEMU_AIO_BLKDEV) {
+#ifdef BLKDISCARD
+        uint64_t range[2] = { aiocb->aio_offset, aiocb->aio_nbytes };
+        retval = ioctl(aiocb->aio_fildes, BLKDISCARD, range);
+#else
+        s->has_discard = 0;
+        retval = 0;
+#endif
+    } else {
+#ifdef FALLOC_FL_PUNCH_HOLE
+        retval = fallocate(aiocb->aio_fildes,
+                           FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,
+                           aiocb->aio_offset, aiocb->aio_nbytes);
+#else
+        s->has_discard = 0;
+        retval = 0;
+#endif
+    }
+    if (retval == -1 &&
+        (errno == ENODEV || errno == ENOSYS || errno == EOPNOTSUPP ||
+         errno == ENOTTY)) {
+        s->has_discard = 0;
+        retval = 0;
+    }
+    return retval;
+}
+
+#ifdef CONFIG_PREADV
+
+static int preadv_present = 1;
+
+static ssize_t
+qemu_preadv(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    return preadv(fd, iov, nr_iov, offset);
+}
+
+static ssize_t
+qemu_pwritev(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    return pwritev(fd, iov, nr_iov, offset);
+}
+
+#else
+
+static int preadv_present = 0;
+
+static ssize_t
+qemu_preadv(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    return -ENOSYS;
+}
+
+static ssize_t
+qemu_pwritev(int fd, const struct iovec *iov, int nr_iov, off_t offset)
+{
+    return -ENOSYS;
+}
+
+#endif
+
+static ssize_t handle_aiocb_rw_vector(struct qemu_paiocb *aiocb)
+{
+    ssize_t len;
+
+    do {
+        if (aiocb->aio_type & QEMU_AIO_WRITE)
+            len = qemu_pwritev(aiocb->aio_fildes,
+                               aiocb->aio_iov,
+                               aiocb->aio_niov,
+                               aiocb->aio_offset);
+         else
+            len = qemu_preadv(aiocb->aio_fildes,
+                              aiocb->aio_iov,
+                              aiocb->aio_niov,
+                              aiocb->aio_offset);
+    } while (len == -1 && errno == EINTR);
+
+    if (len == -1)
+        return -errno;
+    return len;
+}
+
+/*
+ * Read/writes the data to/from a given linear buffer.
+ *
+ * Returns the number of bytes handles or -errno in case of an error. Short
+ * reads are only returned if the end of the file is reached.
+ */
+static ssize_t handle_aiocb_rw_linear(struct qemu_paiocb *aiocb, char *buf)
+{
+    ssize_t offset = 0;
+    ssize_t len;
+
+    while (offset < aiocb->aio_nbytes) {
+         if (aiocb->aio_type & QEMU_AIO_WRITE)
+             len = pwrite(aiocb->aio_fildes,
+                          (const char *)buf + offset,
+                          aiocb->aio_nbytes - offset,
+                          aiocb->aio_offset + offset);
+         else
+             len = pread(aiocb->aio_fildes,
+                         buf + offset,
+                         aiocb->aio_nbytes - offset,
+                         aiocb->aio_offset + offset);
+
+         if (len == -1 && errno == EINTR)
+             continue;
+         else if (len == -1) {
+             offset = -errno;
+             break;
+         } else if (len == 0)
+             break;
+
+         offset += len;
+    }
+
+    return offset;
+}
+
+static ssize_t handle_aiocb_rw(struct qemu_paiocb *aiocb)
+{
+    ssize_t nbytes;
+    char *buf;
+
+    if (!(aiocb->aio_type & QEMU_AIO_MISALIGNED)) {
+        /*
+         * If there is just a single buffer, and it is properly aligned
+         * we can just use plain pread/pwrite without any problems.
+         */
+        if (aiocb->aio_niov == 1)
+             return handle_aiocb_rw_linear(aiocb, aiocb->aio_iov->iov_base);
+
+        /*
+         * We have more than one iovec, and all are properly aligned.
+         *
+         * Try preadv/pwritev first and fall back to linearizing the
+         * buffer if it's not supported.
+         */
+        if (preadv_present) {
+            nbytes = handle_aiocb_rw_vector(aiocb);
+            if (nbytes == aiocb->aio_nbytes)
+                return nbytes;
+            if (nbytes < 0 && nbytes != -ENOSYS)
+                return nbytes;
+            preadv_present = 0;
+        }
+
+        /*
+         * XXX(hch): short read/write.  no easy way to handle the reminder
+         * using these interfaces.  For now retry using plain
+         * pread/pwrite?
+         */
+    }
+
+    /*
+     * Ok, we have to do it the hard way, copy all segments into
+     * a single aligned buffer.
+     */
+    buf = qemu_blockalign(aiocb->bs, aiocb->aio_nbytes);
+    if (aiocb->aio_type & QEMU_AIO_WRITE) {
+        char *p = buf;
+        int i;
+
+        for (i = 0; i < aiocb->aio_niov; ++i) {
+            memcpy(p, aiocb->aio_iov[i].iov_base, aiocb->aio_iov[i].iov_len);
+            p += aiocb->aio_iov[i].iov_len;
+        }
+    }
+
+    nbytes = handle_aiocb_rw_linear(aiocb, buf);
+    if (!(aiocb->aio_type & QEMU_AIO_WRITE)) {
+        char *p = buf;
+        size_t count = aiocb->aio_nbytes, copy;
+        int i;
+
+        for (i = 0; i < aiocb->aio_niov && count; ++i) {
+            copy = count;
+            if (copy > aiocb->aio_iov[i].iov_len)
+                copy = aiocb->aio_iov[i].iov_len;
+            memcpy(aiocb->aio_iov[i].iov_base, p, copy);
+            p     += copy;
+            count -= copy;
+        }
+    }
+    qemu_vfree(buf);
+
+    return nbytes;
+}
+
+static int aio_worker(void *arg)
+{
+    struct qemu_paiocb *aiocb = arg;
+    ssize_t ret = 0;
+
+    switch (aiocb->aio_type & QEMU_AIO_TYPE_MASK) {
+    case QEMU_AIO_READ:
+        ret = handle_aiocb_rw(aiocb);
+        if (ret >= 0 && ret < aiocb->aio_nbytes && aiocb->bs->growable) {
+            /* A short read means that we have reached EOF. Pad the buffer
+             * with zeros for bytes after EOF. */
+            QEMUIOVector qiov;
+
+            qemu_iovec_init_external(&qiov, aiocb->aio_iov,
+                                     aiocb->aio_niov);
+            qemu_iovec_memset_skip(&qiov, 0, aiocb->aio_nbytes - ret, ret);
+
+            ret = aiocb->aio_nbytes;
+        }
+        if (ret == aiocb->aio_nbytes) {
+            ret = 0;
+        } else if (ret >= 0 && ret < aiocb->aio_nbytes) {
+            ret = -EINVAL;
+        }
+        break;
+    case QEMU_AIO_WRITE:
+        ret = handle_aiocb_rw(aiocb);
+        if (ret == aiocb->aio_nbytes) {
+            ret = 0;
+        } else if (ret >= 0 && ret < aiocb->aio_nbytes) {
+            ret = -EINVAL;
+        }
+        break;
+    case QEMU_AIO_FLUSH:
+        ret = handle_aiocb_flush(aiocb);
+        break;
+    case QEMU_AIO_IOCTL:
+        ret = handle_aiocb_ioctl(aiocb);
+        break;
+    case QEMU_AIO_DISCARD:
+        ret = handle_aiocb_discard(aiocb);
+        break;
+    default:
+        fprintf(stderr, "invalid aio request (0x%x)\n", aiocb->aio_type);
+        ret = -EINVAL;
+        break;
+    }
+
+    g_slice_free(struct qemu_paiocb, aiocb);
+    return ret;
+}
+
+static BlockDriverAIOCB *paio_submit(BlockDriverState *bs, int fd,
+        int64_t sector_num, QEMUIOVector *qiov, int nb_sectors,
+        BlockDriverCompletionFunc *cb, void *opaque, int type)
+{
+    struct qemu_paiocb *acb = g_slice_new(struct qemu_paiocb);
+
+    acb->bs = bs;
+    acb->aio_type = type;
+    acb->aio_fildes = fd;
+
+    if (qiov) {
+        acb->aio_iov = qiov->iov;
+        acb->aio_niov = qiov->niov;
+    }
+    acb->aio_nbytes = nb_sectors * 512;
+    acb->aio_offset = sector_num * 512;
+
+    trace_paio_submit(acb, opaque, sector_num, nb_sectors, type);
+    return thread_pool_submit_aio(aio_worker, acb, cb, opaque);
+}
+
+static BlockDriverAIOCB *paio_ioctl(BlockDriverState *bs, int fd,
+        unsigned long int req, void *buf,
+        BlockDriverCompletionFunc *cb, void *opaque)
+{
+    struct qemu_paiocb *acb = g_slice_new(struct qemu_paiocb);
+
+    acb->bs = bs;
+    acb->aio_type = QEMU_AIO_IOCTL;
+    acb->aio_fildes = fd;
+    acb->aio_offset = 0;
+    acb->aio_ioctl_buf = buf;
+    acb->aio_ioctl_cmd = req;
+
+    return thread_pool_submit_aio(aio_worker, acb, cb, opaque);
 }
 
 static BlockDriverAIOCB *raw_aio_submit(BlockDriverState *bs,
@@ -583,37 +901,14 @@ static int raw_create(const char *filename, QEMUOptionParameter *options)
     return result;
 }
 
-#ifdef CONFIG_XFS
-static int xfs_discard(BDRVRawState *s, int64_t sector_num, int nb_sectors)
+static coroutine_fn BlockDriverAIOCB *raw_aio_discard(BlockDriverState *bs,
+    int64_t sector_num, int nb_sectors,
+    BlockDriverCompletionFunc *cb, void *opaque)
 {
-    struct xfs_flock64 fl;
-
-    memset(&fl, 0, sizeof(fl));
-    fl.l_whence = SEEK_SET;
-    fl.l_start = sector_num << 9;
-    fl.l_len = (int64_t)nb_sectors << 9;
-
-    if (xfsctl(NULL, s->fd, XFS_IOC_UNRESVSP64, &fl) < 0) {
-        DEBUG_BLOCK_PRINT("cannot punch hole (%s)\n", strerror(errno));
-        return -errno;
-    }
-
-    return 0;
-}
-#endif
-
-static coroutine_fn int raw_co_discard(BlockDriverState *bs,
-    int64_t sector_num, int nb_sectors)
-{
-#ifdef CONFIG_XFS
     BDRVRawState *s = bs->opaque;
 
-    if (s->is_xfs) {
-        return xfs_discard(s, sector_num, nb_sectors);
-    }
-#endif
-
-    return 0;
+    return paio_submit(bs, s->fd, sector_num, NULL, nb_sectors,
+                       cb, opaque, QEMU_AIO_DISCARD);
 }
 
 static QEMUOptionParameter raw_create_options[] = {
@@ -633,11 +928,11 @@ static BlockDriver bdrv_file = {
     .bdrv_file_open = raw_open,
     .bdrv_close = raw_close,
     .bdrv_create = raw_create,
-    .bdrv_co_discard = raw_co_discard,
 
     .bdrv_aio_readv = raw_aio_readv,
     .bdrv_aio_writev = raw_aio_writev,
     .bdrv_aio_flush = raw_aio_flush,
+    .bdrv_aio_discard = raw_aio_discard,
 
     .bdrv_truncate = raw_truncate,
     .bdrv_getlength = raw_getlength,
@@ -838,6 +1133,19 @@ static BlockDriverAIOCB *hdev_aio_ioctl(BlockDriverState *bs,
     return paio_ioctl(bs, s->fd, req, buf, cb, opaque);
 }
 
+static coroutine_fn BlockDriverAIOCB *hdev_aio_discard(BlockDriverState *bs,
+    int64_t sector_num, int nb_sectors,
+    BlockDriverCompletionFunc *cb, void *opaque)
+{
+    BDRVRawState *s = bs->opaque;
+
+    if (fd_open(bs) < 0) {
+        return NULL;
+    }
+    return paio_submit(bs, s->fd, sector_num, NULL, nb_sectors,
+                       cb, opaque, QEMU_AIO_DISCARD|QEMU_AIO_BLKDEV);
+}
+
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 static int fd_open(BlockDriverState *bs)
 {
@@ -906,6 +1214,7 @@ static BlockDriver bdrv_host_device = {
     .bdrv_aio_readv	= raw_aio_readv,
     .bdrv_aio_writev	= raw_aio_writev,
     .bdrv_aio_flush	= raw_aio_flush,
+    .bdrv_aio_discard   = hdev_aio_discard,
 
     .bdrv_truncate      = raw_truncate,
     .bdrv_getlength	= raw_getlength,

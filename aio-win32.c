@@ -1,10 +1,12 @@
 /*
  * QEMU aio implementation
  *
- * Copyright IBM, Corp. 2008
+ * Copyright IBM Corp., 2008
+ * Copyright Red Hat Inc., 2012
  *
  * Authors:
  *  Anthony Liguori   <aliguori@us.ibm.com>
+ *  Paolo Bonzini     <pbonzini@redhat.com>
  *
  * This work is licensed under the terms of the GNU GPL, version 2.  See
  * the COPYING file in the top-level directory.
@@ -31,45 +33,35 @@ static int walking_handlers;
 
 struct AioHandler
 {
-    int fd;
-    IOHandler *io_read;
-    IOHandler *io_write;
-    AioFlushHandler *io_flush;
+    EventNotifier *e;
+    EventNotifierHandler *io_notify;
+    AioFlushEventNotifierHandler *io_flush;
     int deleted;
-    void *opaque;
     QLIST_ENTRY(AioHandler) node;
 };
 
-static AioHandler *find_aio_handler(int fd)
+void qemu_aio_set_event_notifier(EventNotifier *e,
+                                 EventNotifierHandler *io_notify,
+                                 AioFlushEventNotifierHandler *io_flush)
 {
     AioHandler *node;
 
     QLIST_FOREACH(node, &aio_handlers, node) {
-        if (node->fd == fd)
-            if (!node->deleted)
-                return node;
+        if (node->e == e && !node->deleted) {
+            break;
+        }
     }
 
-    return NULL;
-}
-
-int qemu_aio_set_fd_handler(int fd,
-                            IOHandler *io_read,
-                            IOHandler *io_write,
-                            AioFlushHandler *io_flush,
-                            void *opaque)
-{
-    AioHandler *node;
-
-    node = find_aio_handler(fd);
-
     /* Are we deleting the fd handler? */
-    if (!io_read && !io_write) {
+    if (!io_notify) {
         if (node) {
+            qemu_del_wait_object(event_notifier_get_handle(e),
+                                 (WaitObjectFunc *) node->io_notify, e);
+
             /* If the lock is held, just mark the node as deleted */
-            if (walking_handlers)
+            if (walking_handlers) {
                 node->deleted = 1;
-            else {
+            } else {
                 /* Otherwise, delete it for real.  We can't just mark it as
                  * deleted because deleted nodes are only cleaned up after
                  * releasing the walking_handlers lock.
@@ -82,19 +74,15 @@ int qemu_aio_set_fd_handler(int fd,
         if (node == NULL) {
             /* Alloc and insert if it's not already there */
             node = g_malloc0(sizeof(AioHandler));
-            node->fd = fd;
+            node->e = e;
             QLIST_INSERT_HEAD(&aio_handlers, node, node);
         }
         /* Update handler with latest information */
-        node->io_read = io_read;
-        node->io_write = io_write;
+        node->io_notify = io_notify;
         node->io_flush = io_flush;
-        node->opaque = opaque;
+        qemu_add_wait_object(event_notifier_get_handle(e),
+                             (WaitObjectFunc *) io_notify, e);
     }
-
-    qemu_set_fd_handler2(fd, NULL, io_read, io_write, opaque);
-
-    return 0;
 }
 
 void qemu_aio_flush(void)
@@ -105,10 +93,11 @@ void qemu_aio_flush(void)
 bool qemu_aio_wait(void)
 {
     AioHandler *node;
-    fd_set rdfds, wrfds;
-    int max_fd = -1;
-    int ret;
+    HANDLE events[MAXIMUM_WAIT_OBJECTS + 1];
     bool busy;
+    int count;
+    int ret;
+    int timeout;
 
     /*
      * If there are callbacks left that have been queued, we need to call then.
@@ -121,29 +110,22 @@ bool qemu_aio_wait(void)
 
     walking_handlers = 1;
 
-    FD_ZERO(&rdfds);
-    FD_ZERO(&wrfds);
-
     /* fill fd sets */
     busy = false;
+    count = 0;
     QLIST_FOREACH(node, &aio_handlers, node) {
         /* If there aren't pending AIO operations, don't invoke callbacks.
          * Otherwise, if there are no AIO requests, qemu_aio_wait() would
          * wait indefinitely.
          */
         if (node->io_flush) {
-            if (node->io_flush(node->opaque) == 0) {
+            if (node->io_flush(node->e) == 0) {
                 continue;
             }
             busy = true;
         }
-        if (!node->deleted && node->io_read) {
-            FD_SET(node->fd, &rdfds);
-            max_fd = MAX(max_fd, node->fd + 1);
-        }
-        if (!node->deleted && node->io_write) {
-            FD_SET(node->fd, &wrfds);
-            max_fd = MAX(max_fd, node->fd + 1);
+        if (!node->deleted && node->io_notify) {
+            events[count++] = event_notifier_get_handle(node->e);
         }
     }
 
@@ -155,10 +137,16 @@ bool qemu_aio_wait(void)
     }
 
     /* wait until next event */
-    ret = select(max_fd, &rdfds, &wrfds, NULL, NULL);
+    timeout = INFINITE;
+    for (;;) {
+        ret = WaitForMultipleObjects(count, events, FALSE, timeout);
+        if ((DWORD) (ret - WAIT_OBJECT_0) >= count) {
+            break;
+        }
 
-    /* if we have any readable fds, dispatch event */
-    if (ret > 0) {
+        timeout = 0;
+
+        /* if we have any signaled events, dispatch event */
         walking_handlers = 1;
 
         /* we have to walk very carefully in case
@@ -168,14 +156,9 @@ bool qemu_aio_wait(void)
             AioHandler *tmp;
 
             if (!node->deleted &&
-                FD_ISSET(node->fd, &rdfds) &&
-                node->io_read) {
-                node->io_read(node->opaque);
-            }
-            if (!node->deleted &&
-                FD_ISSET(node->fd, &wrfds) &&
-                node->io_write) {
-                node->io_write(node->opaque);
+                event_notifier_get_handle(node->e) == events[ret - WAIT_OBJECT_0] &&
+                node->io_notify) {
+                node->io_notify(node->e);
             }
 
             tmp = node;
