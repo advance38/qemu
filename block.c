@@ -2506,7 +2506,7 @@ BlockInfo *bdrv_query_info(BlockDriverState *bs)
     if (bs->dirty_bitmap) {
         info->has_dirty = true;
         info->dirty = g_malloc0(sizeof(*info->dirty));
-        info->dirty->count = bdrv_get_dirty_count(bs) * BDRV_SECTORS_PER_DIRTY_CHUNK;
+        info->dirty->count = bdrv_get_dirty_count(bs);
     }
 
     if (bs->drv) {
@@ -3831,7 +3831,7 @@ void bdrv_reset_dirty(BlockDriverState *bs, int64_t cur_sector,
 int64_t bdrv_get_dirty_count(BlockDriverState *bs)
 {
     if (bs->dirty_bitmap) {
-        return hbitmap_count(bs->dirty_bitmap) >> BDRV_LOG_SECTORS_PER_DIRTY_CHUNK;
+        return hbitmap_count(bs->dirty_bitmap);
     } else {
         return 0;
     }
