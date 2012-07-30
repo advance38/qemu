@@ -2504,6 +2504,7 @@ BlockInfoList *qmp_query_block(Error **errp)
         info->value->device = g_strdup(bs->device_name);
         info->value->type = g_strdup("unknown");
         info->value->locked = bdrv_dev_is_medium_locked(bs);
+        info->value->hostcache = !(bs->open_flags & BDRV_O_NOCACHE);
         info->value->removable = bdrv_dev_has_removable_media(bs);
 
         if (bdrv_dev_has_removable_media(bs)) {
