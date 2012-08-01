@@ -1826,7 +1826,7 @@ int main(int argc, char **argv)
     };
     int c;
     int opt_index = 0;
-    int flags = 0;
+    int flags = BDRV_O_CACHE_WB;
 
     progname = basename(argv[0]);
 
