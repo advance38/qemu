@@ -420,7 +420,7 @@
   'data': { 'file': 'str', 'ro': 'bool', 'drv': 'str',
             '*backing_file': 'str', 'encrypted': 'bool',
             'bps': 'int', 'bps_rd': 'int', 'bps_wr': 'int',
-            'iops': 'int', 'iops_rd': 'int', 'iops_wr': 'int'} }
+            'iops': 'int', 'iops_rd': 'int', 'iops_wr': 'int' } }
 
 ##
 # @BlockDeviceIoStatus:
@@ -436,6 +436,18 @@
 # Since: 1.0
 ##
 { 'enum': 'BlockDeviceIoStatus', 'data': [ 'ok', 'failed', 'nospace' ] }
+
+##
+# @BlockDirtyInfo:
+#
+# Block dirty bitmap information.
+#
+# @count: number of dirty sectors according to the dirty bitmap
+#
+# Since: 1.2
+##
+{ 'type': 'BlockDirtyInfo',
+  'data': {'count': 'int'} }
 
 ##
 # @BlockInfo:
@@ -456,6 +468,9 @@
 # @tray_open: #optional True if the device has a tray and it is open
 #             (only present if removable is true)
 #
+# @dirty: #optional dirty bitmap information (only present if the dirty
+#         bitmap is enabled)
+#
 # @io-status: #optional @BlockDeviceIoStatus. Only present if the device
 #             supports it and the VM is configured to stop on errors
 #
@@ -467,7 +482,8 @@
 { 'type': 'BlockInfo',
   'data': {'device': 'str', 'type': 'str', 'removable': 'bool',
            'locked': 'bool', '*inserted': 'BlockDeviceInfo',
-           '*tray_open': 'bool', '*io-status': 'BlockDeviceIoStatus'} }
+           '*tray_open': 'bool', '*io-status': 'BlockDeviceIoStatus',
+           '*dirty': 'BlockDirtyInfo' } }
 
 ##
 # @query-block:
