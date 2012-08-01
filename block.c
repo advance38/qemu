@@ -1153,7 +1153,7 @@ void bdrv_set_dev_ops(BlockDriverState *bs, const BlockDevOps *ops,
 }
 
 void bdrv_emit_qmp_error_event(const BlockDriverState *bdrv,
-                               BlockErrorAction action, int is_read)
+                               BlockErrorAction action, bool is_read)
 {
     QObject *data;
     const char *action_str;
@@ -2142,7 +2142,7 @@ void bdrv_set_on_error(BlockDriverState *bs, BlockdevOnError on_read_error,
     bs->on_write_error = on_write_error;
 }
 
-BlockdevOnError bdrv_get_on_error(BlockDriverState *bs, int is_read)
+BlockdevOnError bdrv_get_on_error(BlockDriverState *bs, bool is_read)
 {
     return is_read ? bs->on_read_error : bs->on_write_error;
 }
