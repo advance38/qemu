@@ -199,13 +199,22 @@ static int socket_get_buffer(void *opaque, uint8_t *buf, int64_t pos, int size)
     QEMUFileSocket *s = opaque;
     ssize_t len;
 
-    do {
+    for (;;) {
         len = qemu_recv(s->fd, buf, size, 0);
-    } while (len == -1 && socket_error() == EINTR);
+        if (len != -1) {
+            break;
+        }
+        if (errno == EAGAIN) {
+            assert(qemu_in_coroutine());
+            qemu_coroutine_yield();
+        } else if (errno != EINTR) {
+            break;
+        }
+    }
 
-    if (len == -1)
+    if (len == -1) {
         len = -socket_error();
-
+    }
     return len;
 }
 
@@ -236,10 +245,19 @@ static int stdio_get_buffer(void *opaque, uint8_t *buf, int64_t pos, int size)
     FILE *fp = s->stdio_file;
     int bytes;
 
-    do {
+    for (;;) {
         clearerr(fp);
         bytes = fread(buf, 1, size, fp);
-    } while ((bytes == 0) && ferror(fp) && (errno == EINTR));
+        if (bytes != 0 || !ferror(fp)) {
+            break;
+        }
+        if (errno == EAGAIN) {
+            assert(qemu_in_coroutine());
+            qemu_coroutine_yield();
+        } else if (errno != EINTR) {
+            break;
+        }
+    }
     return bytes;
 }
 
