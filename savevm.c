@@ -162,12 +162,7 @@ void qemu_announce_self(void)
 #define IO_BUF_SIZE 32768
 
 struct QEMUFile {
-    QEMUFilePutBufferFunc *put_buffer;
-    QEMUFileGetBufferFunc *get_buffer;
-    QEMUFileCloseFunc *close;
-    QEMUFileRateLimit *rate_limit;
-    QEMUFileSetRateLimit *set_rate_limit;
-    QEMUFileGetRateLimit *get_rate_limit;
+    const QEMUFileOps *ops;
     void *opaque;
     int is_write;
 
@@ -257,6 +252,16 @@ static int stdio_fclose(void *opaque)
     return ret;
 }
 
+static const QEMUFileOps stdio_pipe_read_ops = {
+    .get_buffer = stdio_get_buffer,
+    .close =      stdio_pclose
+};
+
+static const QEMUFileOps stdio_pipe_write_ops = {
+    .put_buffer = stdio_put_buffer,
+    .close =      stdio_pclose
+};
+
 QEMUFile *qemu_popen(FILE *stdio_file, const char *mode)
 {
     QEMUFileStdio *s;
@@ -271,11 +276,9 @@ QEMUFile *qemu_popen(FILE *stdio_file, const char *mode)
     s->stdio_file = stdio_file;
 
     if(mode[0] == 'r') {
-        s->file = qemu_fopen_ops(s, NULL, stdio_get_buffer, stdio_pclose, 
-				 NULL, NULL, NULL);
+        s->file = qemu_fopen_ops(s, &stdio_pipe_read_ops);
     } else {
-        s->file = qemu_fopen_ops(s, stdio_put_buffer, NULL, stdio_pclose, 
-				 NULL, NULL, NULL);
+        s->file = qemu_fopen_ops(s, &stdio_pipe_write_ops);
     }
     return s->file;
 }
@@ -303,6 +306,16 @@ int qemu_stdio_fd(QEMUFile *f)
     return fd;
 }
 
+static const QEMUFileOps stdio_file_read_ops = {
+    .get_buffer = stdio_get_buffer,
+    .close =      stdio_fclose
+};
+
+static const QEMUFileOps stdio_file_write_ops = {
+    .put_buffer = stdio_put_buffer,
+    .close =      stdio_fclose
+};
+
 QEMUFile *qemu_fdopen(int fd, const char *mode)
 {
     QEMUFileStdio *s;
@@ -320,11 +333,9 @@ QEMUFile *qemu_fdopen(int fd, const char *mode)
         goto fail;
 
     if(mode[0] == 'r') {
-        s->file = qemu_fopen_ops(s, NULL, stdio_get_buffer, stdio_fclose, 
-				 NULL, NULL, NULL);
+        s->file = qemu_fopen_ops(s, &stdio_file_read_ops);
     } else {
-        s->file = qemu_fopen_ops(s, stdio_put_buffer, NULL, stdio_fclose, 
-				 NULL, NULL, NULL);
+        s->file = qemu_fopen_ops(s, &stdio_file_write_ops);
     }
     return s->file;
 
@@ -333,13 +344,17 @@ fail:
     return NULL;
 }
 
+static const QEMUFileOps socket_read_ops = {
+    .get_buffer = socket_get_buffer,
+    .close =      socket_close
+};
+
 QEMUFile *qemu_fopen_socket(int fd)
 {
     QEMUFileSocket *s = g_malloc0(sizeof(QEMUFileSocket));
 
     s->fd = fd;
-    s->file = qemu_fopen_ops(s, NULL, socket_get_buffer, socket_close, 
-			     NULL, NULL, NULL);
+    s->file = qemu_fopen_ops(s, &socket_read_ops);
     return s->file;
 }
 
@@ -357,6 +372,16 @@ static int file_get_buffer(void *opaque, uint8_t *buf, int64_t pos, int size)
     fseek(s->stdio_file, pos, SEEK_SET);
     return fread(buf, 1, size, s->stdio_file);
 }
+
+static const QEMUFileOps stdio_seekable_file_read_ops = {
+    .get_buffer = file_get_buffer,
+    .close =      stdio_fclose
+};
+
+static const QEMUFileOps stdio_seekable_file_write_ops = {
+    .put_buffer = file_put_buffer,
+    .close =      stdio_fclose
+};
 
 QEMUFile *qemu_fopen(const char *filename, const char *mode)
 {
@@ -376,11 +401,9 @@ QEMUFile *qemu_fopen(const char *filename, const char *mode)
         goto fail;
     
     if(mode[0] == 'w') {
-        s->file = qemu_fopen_ops(s, file_put_buffer, NULL, stdio_fclose, 
-				 NULL, NULL, NULL);
+        s->file = qemu_fopen_ops(s, &stdio_seekable_file_write_ops);
     } else {
-        s->file = qemu_fopen_ops(s, NULL, file_get_buffer, stdio_fclose, 
-			       NULL, NULL, NULL);
+        s->file = qemu_fopen_ops(s, &stdio_seekable_file_read_ops);
     }
     return s->file;
 fail:
@@ -405,32 +428,31 @@ static int bdrv_fclose(void *opaque)
     return bdrv_flush(opaque);
 }
 
+static const QEMUFileOps bdrv_read_ops = {
+    .get_buffer = block_get_buffer,
+    .close =      bdrv_fclose
+};
+
+static const QEMUFileOps bdrv_write_ops = {
+    .put_buffer = block_put_buffer,
+    .close =      bdrv_fclose
+};
+
 static QEMUFile *qemu_fopen_bdrv(BlockDriverState *bs, int is_writable)
 {
     if (is_writable)
-        return qemu_fopen_ops(bs, block_put_buffer, NULL, bdrv_fclose, 
-			      NULL, NULL, NULL);
-    return qemu_fopen_ops(bs, NULL, block_get_buffer, bdrv_fclose, NULL, NULL, NULL);
+        return qemu_fopen_ops(bs, &bdrv_write_ops);
+    return qemu_fopen_ops(bs, &bdrv_read_ops);
 }
 
-QEMUFile *qemu_fopen_ops(void *opaque, QEMUFilePutBufferFunc *put_buffer,
-                         QEMUFileGetBufferFunc *get_buffer,
-                         QEMUFileCloseFunc *close,
-                         QEMUFileRateLimit *rate_limit,
-                         QEMUFileSetRateLimit *set_rate_limit,
-                         QEMUFileGetRateLimit *get_rate_limit)
+QEMUFile *qemu_fopen_ops(void *opaque, const QEMUFileOps *ops)
 {
     QEMUFile *f;
 
     f = g_malloc0(sizeof(QEMUFile));
 
     f->opaque = opaque;
-    f->put_buffer = put_buffer;
-    f->get_buffer = get_buffer;
-    f->close = close;
-    f->rate_limit = rate_limit;
-    f->set_rate_limit = set_rate_limit;
-    f->get_rate_limit = get_rate_limit;
+    f->ops = ops;
     f->is_write = 0;
 
     return f;
@@ -464,13 +486,13 @@ static void qemu_file_set_if_error(QEMUFile *f, int ret)
  */
 void qemu_fflush(QEMUFile *f)
 {
-    if (!f->put_buffer)
+    if (!f->ops->put_buffer)
         return;
 
     if (f->is_write && f->buf_index > 0) {
         int len;
 
-        len = f->put_buffer(f->opaque, f->buf, f->buf_offset, f->buf_index);
+        len = f->ops->put_buffer(f->opaque, f->buf, f->buf_offset, f->buf_index);
         if (len > 0)
             f->buf_offset += f->buf_index;
         else
@@ -484,7 +506,7 @@ static void qemu_fill_buffer(QEMUFile *f)
     int len;
     int pending;
 
-    if (!f->get_buffer)
+    if (!f->ops->get_buffer)
         return;
 
     if (f->is_write)
@@ -497,7 +519,7 @@ static void qemu_fill_buffer(QEMUFile *f)
     f->buf_index = 0;
     f->buf_size = pending;
 
-    len = f->get_buffer(f->opaque, f->buf + pending, f->buf_offset,
+    len = f->ops->get_buffer(f->opaque, f->buf + pending, f->buf_offset,
                         IO_BUF_SIZE - pending);
     if (len > 0) {
         f->buf_size += len;
@@ -512,13 +534,13 @@ static void qemu_fill_buffer(QEMUFile *f)
  *
  * Internal function. qemu_fflush() must be called before this.
  *
- * Returns f->close() return value, or 0 if close function is not set.
+ * Returns f->ops->close() return value, or 0 if close function is not set.
  */
 static int qemu_fclose_internal(QEMUFile *f)
 {
     int ret = 0;
-    if (f->close) {
-        ret = f->close(f->opaque);
+    if (f->ops->close) {
+        ret = f->ops->close(f->opaque);
         qemu_file_set_if_error(f, ret);
     }
     return ret;
@@ -549,7 +571,7 @@ int qemu_fclose(QEMUFile *f)
 
 void qemu_file_put_notify(QEMUFile *f)
 {
-    f->put_buffer(f->opaque, NULL, 0, 0);
+    f->ops->put_buffer(f->opaque, NULL, 0, 0);
 }
 
 void qemu_put_buffer(QEMUFile *f, const uint8_t *buf, int size)
@@ -687,7 +709,7 @@ int64_t qemu_fseek(QEMUFile *f, int64_t pos, int whence)
         /* SEEK_END not supported */
         return -1;
     }
-    if (f->put_buffer) {
+    if (f->ops->put_buffer) {
         qemu_fflush(f);
         f->buf_offset = pos;
     } else {
@@ -700,16 +722,16 @@ int64_t qemu_fseek(QEMUFile *f, int64_t pos, int whence)
 
 int qemu_file_rate_limit(QEMUFile *f)
 {
-    if (f->rate_limit)
-        return f->rate_limit(f->opaque);
+    if (f->ops->rate_limit)
+        return f->ops->rate_limit(f->opaque);
 
     return 0;
 }
 
 int64_t qemu_file_get_rate_limit(QEMUFile *f)
 {
-    if (f->get_rate_limit)
-        return f->get_rate_limit(f->opaque);
+    if (f->ops->get_rate_limit)
+        return f->ops->get_rate_limit(f->opaque);
 
     return 0;
 }
@@ -718,8 +740,8 @@ int64_t qemu_file_set_rate_limit(QEMUFile *f, int64_t new_rate)
 {
     /* any failed or completed migration keeps its state to allow probing of
      * migration data, but has no associated file anymore */
-    if (f && f->set_rate_limit)
-        return f->set_rate_limit(f->opaque, new_rate);
+    if (f && f->ops->set_rate_limit)
+        return f->ops->set_rate_limit(f->opaque, new_rate);
 
     return 0;
 }
