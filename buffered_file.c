@@ -199,6 +199,13 @@ static int buffered_close(void *opaque)
  *   1: Time to stop
  *   negative: There has been an error
  */
+static int buffered_get_fd(void *opaque)
+{
+    QEMUFileBuffered *s = opaque;
+
+    return qemu_get_fd(s->file);
+}
+
 static int buffered_rate_limit(void *opaque)
 {
     QEMUFileBuffered *s = opaque;
@@ -263,6 +270,7 @@ static void buffered_rate_tick(void *opaque)
 }
 
 static const QEMUFileOps buffered_file_ops = {
+    .get_fd =         buffered_get_fd,
     .put_buffer =     buffered_put_buffer,
     .close =          buffered_close,
     .rate_limit =     buffered_rate_limit,
