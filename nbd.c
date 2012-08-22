@@ -893,7 +893,6 @@ void nbd_export_close(NBDExport *exp)
         g_free(exp->name);
     }
 
-    bdrv_close(exp->bs);
     g_free(exp);
 }
 
