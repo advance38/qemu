@@ -657,18 +657,22 @@ static void nbd_client_get(NBDClient *client)
 static void nbd_client_put(NBDClient *client)
 {
     if (--client->refcount == 0) {
+        qemu_set_fd_handler2(client->sock, NULL, NULL, NULL, NULL);
+        close(client->sock);
+        client->sock = -1;
+        if (client->close) {
+            client->close(client);
+        }
         g_free(client);
     }
 }
 
-static void nbd_client_close(NBDClient *client)
+void nbd_client_close(NBDClient *client)
 {
-    qemu_set_fd_handler2(client->sock, NULL, NULL, NULL, NULL);
-    close(client->sock);
-    client->sock = -1;
-    if (client->close) {
-        client->close(client);
-    }
+    /* Force requests to finish.  They will drop their own references,
+     * then we'll close the socket and free the NBDClient.
+     */
+    shutdown(client->sock, 2);
     nbd_client_put(client);
 }
 
