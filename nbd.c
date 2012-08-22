@@ -90,12 +90,16 @@ struct NBDRequest {
 
 struct NBDExport {
     BlockDriverState *bs;
+    char *name;
     off_t dev_offset;
     off_t size;
     uint32_t nbdflags;
     QTAILQ_HEAD(, NBDClient) clients;
     QSIMPLEQ_HEAD(, NBDRequest) requests;
+    QTAILQ_ENTRY(NBDExport) next;
 };
+
+static QTAILQ_HEAD(, NBDExport) exports = QTAILQ_HEAD_INITIALIZER(exports);
 
 struct NBDClient {
     int refcount;
@@ -724,6 +728,27 @@ NBDExport *nbd_export_new(BlockDriverState *bs, off_t dev_offset,
     return exp;
 }
 
+NBDExport *nbd_export_find(const char *name)
+{
+    NBDExport *exp;
+    QTAILQ_FOREACH(exp, &exports, next) {
+        if (strcmp(name, exp->name) == 0) {
+            return exp;
+        }
+    }
+
+    return NULL;
+}
+
+void nbd_export_set_name(NBDExport *exp, const char *name)
+{
+    assert(exp->name == NULL);
+    assert(!nbd_export_find(name));
+
+    exp->name = g_strdup(name);
+    QTAILQ_INSERT_TAIL(&exports, exp, next);
+}
+
 void nbd_export_close(NBDExport *exp)
 {
     while (!QTAILQ_EMPTY(&exp->clients)) {
@@ -738,8 +763,21 @@ void nbd_export_close(NBDExport *exp)
         g_free(first);
     }
 
+    if (exp->name) {
+        QTAILQ_REMOVE(&exports, exp, next);
+        g_free(exp->name);
+    }
+
     bdrv_close(exp->bs);
     g_free(exp);
+}
+
+void nbd_export_close_all(void)
+{
+    while (!QTAILQ_EMPTY(&exports)) {
+        NBDExport *export = QTAILQ_FIRST(&exports);
+        nbd_export_close(export);
+    }
 }
 
 static int nbd_can_read(void *opaque);
