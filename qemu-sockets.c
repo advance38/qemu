@@ -32,9 +32,9 @@
 static const int on=1, off=0;
 
 /* used temporarely until all users are converted to QemuOpts */
-static QemuOptsList dummy_opts = {
-    .name = "dummy",
-    .head = QTAILQ_HEAD_INITIALIZER(dummy_opts.head),
+QemuOptsList socket_opts = {
+    .name = "socket",
+    .head = QTAILQ_HEAD_INITIALIZER(socket_opts.head),
     .desc = {
         {
             .name = "path",
@@ -469,7 +469,7 @@ int inet_listen(const char *str, char *ostr, int olen,
     char *optstr;
     int sock = -1;
 
-    opts = qemu_opts_create(&dummy_opts, NULL, 0, NULL);
+    opts = qemu_opts_create(&socket_opts, NULL, 0, NULL);
     if (inet_parse(opts, str) == 0) {
         sock = inet_listen_opts(opts, port_offset, errp);
         if (sock != -1 && ostr) {
@@ -498,7 +498,7 @@ int inet_connect(const char *str, bool block, bool *in_progress, Error **errp)
     QemuOpts *opts;
     int sock = -1;
 
-    opts = qemu_opts_create(&dummy_opts, NULL, 0, NULL);
+    opts = qemu_opts_create(&socket_opts, NULL, 0, NULL);
     if (inet_parse(opts, str) == 0) {
         if (block) {
             qemu_opt_set(opts, "block", "on");
@@ -597,7 +597,7 @@ int unix_listen(const char *str, char *ostr, int olen)
     char *path, *optstr;
     int sock, len;
 
-    opts = qemu_opts_create(&dummy_opts, NULL, 0, NULL);
+    opts = qemu_opts_create(&socket_opts, NULL, 0, NULL);
 
     optstr = strchr(str, ',');
     if (optstr) {
@@ -625,7 +625,7 @@ int unix_connect(const char *path)
     QemuOpts *opts;
     int sock;
 
-    opts = qemu_opts_create(&dummy_opts, NULL, 0, NULL);
+    opts = qemu_opts_create(&socket_opts, NULL, 0, NULL);
     qemu_opt_set(opts, "path", path);
     sock = unix_connect_opts(opts);
     qemu_opts_del(opts);

@@ -30,6 +30,8 @@ int inet_aton(const char *cp, struct in_addr *ia);
 #include "error.h"
 #include "qerror.h"
 
+extern QemuOptsList socket_opts;
+
 /* misc helpers */
 int qemu_socket(int domain, int type, int protocol);
 int qemu_accept(int s, struct sockaddr *addr, socklen_t *addrlen);
