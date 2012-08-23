@@ -351,7 +351,7 @@ err:
 }
 
 /* compatibility wrapper */
-static int inet_parse(IPSocketAddress **p_addr, const char *str)
+int inet_parse(IPSocketAddress **p_addr, const char *str)
 {
     IPSocketAddress *addr;
     const char *optstr, *h;
