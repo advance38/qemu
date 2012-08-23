@@ -2483,9 +2483,9 @@ static CharDriverState *qemu_chr_open_socket(QemuOpts *opts)
         }
     } else {
         if (opt->server) {
-            fd = inet_listen_opts(opts, 0, NULL);
+            fd = inet_listen_opts(ip_opt->addr, 0, NULL);
         } else {
-            fd = inet_connect_opts(opts, opt->wait, NULL, NULL);
+            fd = inet_connect_opts(ip_opt->addr, opt->wait, NULL, NULL);
         }
     }
     if (fd < 0) {
@@ -2525,15 +2525,15 @@ static CharDriverState *qemu_chr_open_socket(QemuOpts *opts)
     chr->filename = g_malloc(256);
     if (is_unix) {
         snprintf(chr->filename, 256, "unix:%s%s",
-                 qemu_opt_get(opts, "path"),
+                 unix_opt->addr->path,
                  opt->server ? ",server" : "");
     } else if (opt->telnet) {
         snprintf(chr->filename, 256, "telnet:%s:%s%s",
-                 qemu_opt_get(opts, "host"), qemu_opt_get(opts, "port"),
+                 ip_opt->addr->host, ip_opt->addr->port,
                  opt->server ? ",server" : "");
     } else {
         snprintf(chr->filename, 256, "tcp:%s:%s%s",
-                 qemu_opt_get(opts, "host"), qemu_opt_get(opts, "port"),
+                 ip_opt->addr->host, ip_opt->addr->port,
                  opt->server ? ",server" : "");
     }
 
