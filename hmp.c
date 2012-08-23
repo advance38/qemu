@@ -1109,30 +1109,17 @@ void hmp_nbd_server_start(Monitor *mon, const QDict *qdict)
     const char *uri = qdict_get_str(qdict, "uri");
     int writable = qdict_get_try_bool(qdict, "writable", 0);
     Error *errp = NULL;
-    QemuOpts *opts;
     BlockDriverState *bs;
-    IPSocketAddress addr;
+    IPSocketAddress *addr;
 
     /* First check if the address is available and start the server.  */
-    opts = qemu_opts_create(&socket_opts, NULL, 0, NULL);
-    if (inet_parse(opts, uri) != 0) {
+    if (inet_parse(&addr, uri) == 0) {
+        qmp_nbd_server_start(addr, &errp);
+    } else {
         error_set(&errp, QERR_SOCKET_CREATE_FAILED);
-	goto exit;
     }
+    qapi_free_IPSocketAddress(addr);
 
-    memset(&addr, 0, sizeof(addr));
-    addr.host = (char *) qemu_opt_get(opts, "host");
-    addr.port = (char *) qemu_opt_get(opts, "port");
-    addr.ipv4 = qemu_opt_get_bool(opts, "ipv4", 0);
-    addr.ipv6 = qemu_opt_get_bool(opts, "ipv6", 0);
-    addr.has_ipv4 = addr.has_ipv6 = true;
-
-    if (addr.host == NULL || addr.port == NULL) {
-        error_set(&errp, QERR_SOCKET_CREATE_FAILED);
-        goto exit;
-    }
-
-    qmp_nbd_server_start(&addr, &errp);
     if (errp != NULL) {
         goto exit;
     }
@@ -1157,7 +1144,6 @@ void hmp_nbd_server_start(Monitor *mon, const QDict *qdict)
     }
 
 exit:
-    qemu_opts_del(opts);
     hmp_handle_error(mon, &errp);
 }
 

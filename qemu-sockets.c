@@ -103,10 +103,9 @@ const char *inet_strfamily(int family)
     return "unknown";
 }
 
-int inet_listen_opts(QemuOpts *opts, int port_offset, Error **errp)
+int inet_listen_opts(IPSocketAddress *addr, int port_offset, Error **errp)
 {
     struct addrinfo ai,*res,*e;
-    const char *addr;
     char port[33];
     char uaddr[INET6_ADDRSTRLEN+1];
     char uport[33];
@@ -117,27 +116,21 @@ int inet_listen_opts(QemuOpts *opts, int port_offset, Error **errp)
     ai.ai_family = PF_UNSPEC;
     ai.ai_socktype = SOCK_STREAM;
 
-    if ((qemu_opt_get(opts, "host") == NULL) ||
-        (qemu_opt_get(opts, "port") == NULL)) {
-        fprintf(stderr, "%s: host and/or port not specified\n", __FUNCTION__);
-        error_set(errp, QERR_SOCKET_CREATE_FAILED);
-        return -1;
-    }
-    pstrcpy(port, sizeof(port), qemu_opt_get(opts, "port"));
-    addr = qemu_opt_get(opts, "host");
+    assert(addr->host && addr->port);
+    pstrcpy(port, sizeof(port), addr->port);
 
-    to = qemu_opt_get_number(opts, "to", 0);
-    if (qemu_opt_get_bool(opts, "ipv4", 0))
+    to = addr->has_to ? addr->to : 0;
+    if (addr->has_ipv4 && addr->ipv4)
         ai.ai_family = PF_INET;
-    if (qemu_opt_get_bool(opts, "ipv6", 0))
+    if (addr->has_ipv6 && addr->ipv6)
         ai.ai_family = PF_INET6;
 
     /* lookup */
     if (port_offset)
         snprintf(port, sizeof(port), "%d", atoi(port) + port_offset);
-    rc = getaddrinfo(strlen(addr) ? addr : NULL, port, &ai, &res);
+    rc = getaddrinfo(strlen(addr->host) ? addr->host : NULL, port, &ai, &res);
     if (rc != 0) {
-        fprintf(stderr,"getaddrinfo(%s,%s): %s\n", addr, port,
+        fprintf(stderr,"getaddrinfo(%s,%s): %s\n", addr->host, port,
                 gai_strerror(rc));
         error_set(errp, QERR_SOCKET_CREATE_FAILED);
         return -1;
@@ -197,20 +190,21 @@ listen:
         freeaddrinfo(res);
         return -1;
     }
-    snprintf(uport, sizeof(uport), "%d", inet_getport(e) - port_offset);
-    qemu_opt_set(opts, "host", uaddr);
-    qemu_opt_set(opts, "port", uport);
-    qemu_opt_set(opts, "ipv6", (e->ai_family == PF_INET6) ? "on" : "off");
-    qemu_opt_set(opts, "ipv4", (e->ai_family != PF_INET6) ? "on" : "off");
+    g_free(addr->host);
+    g_free(addr->port);
+    addr->host = g_strdup(uaddr);
+    addr->port = g_strdup_printf(uport, "%d", inet_getport(e) - port_offset);
+    addr->has_ipv4 = true;
+    addr->has_ipv6 = true;
+    addr->has_ipv4 = (e->ai_family != PF_INET6);
+    addr->has_ipv6 = (e->ai_family == PF_INET6);
     freeaddrinfo(res);
     return slisten;
 }
 
-int inet_connect_opts(QemuOpts *opts, bool block, bool *in_progress, Error **errp)
+int inet_connect_opts(IPSocketAddress *addr, bool block, bool *in_progress, Error **errp)
 {
     struct addrinfo ai,*res,*e;
-    const char *addr;
-    const char *port;
     char uaddr[INET6_ADDRSTRLEN+1];
     char uport[33];
     int sock,rc;
@@ -224,22 +218,16 @@ int inet_connect_opts(QemuOpts *opts, bool block, bool *in_progress, Error **err
         *in_progress = false;
     }
 
-    addr = qemu_opt_get(opts, "host");
-    port = qemu_opt_get(opts, "port");
-    if (addr == NULL || port == NULL) {
-        fprintf(stderr, "inet_connect: host and/or port not specified\n");
-        error_set(errp, QERR_SOCKET_CREATE_FAILED);
-        return -1;
-    }
+    assert(addr->host && addr->port);
 
-    if (qemu_opt_get_bool(opts, "ipv4", 0))
+    if (addr->has_ipv4 && addr->ipv4)
         ai.ai_family = PF_INET;
-    if (qemu_opt_get_bool(opts, "ipv6", 0))
+    if (addr->has_ipv6 && addr->ipv6)
         ai.ai_family = PF_INET6;
 
     /* lookup */
-    if (0 != (rc = getaddrinfo(addr, port, &ai, &res))) {
-        fprintf(stderr,"getaddrinfo(%s,%s): %s\n", addr, port,
+    if (0 != (rc = getaddrinfo(addr->host, addr->port, &ai, &res))) {
+        fprintf(stderr,"getaddrinfo(%s,%s): %s\n", addr->host, addr->port,
                 gai_strerror(rc));
         error_set(errp, QERR_SOCKET_CREATE_FAILED);
 	return -1;
@@ -402,104 +390,113 @@ err:
 }
 
 /* compatibility wrapper */
-int inet_parse(QemuOpts *opts, const char *str)
+int inet_parse(IPSocketAddress **p_addr, const char *str)
 {
+    IPSocketAddress *addr;
     const char *optstr, *h;
-    char addr[64];
+    char host[64];
     char port[33];
     int pos;
+
+    *p_addr = addr = g_malloc0(sizeof(IPSocketAddress));
 
     /* parse address */
     if (str[0] == ':') {
         /* no host given */
-        addr[0] = '\0';
+        host[0] = '\0';
         if (1 != sscanf(str,":%32[^,]%n",port,&pos)) {
             fprintf(stderr, "%s: portonly parse error (%s)\n",
                     __FUNCTION__, str);
-            return -1;
+            goto fail;
         }
     } else if (str[0] == '[') {
         /* IPv6 addr */
-        if (2 != sscanf(str,"[%64[^]]]:%32[^,]%n",addr,port,&pos)) {
+        if (2 != sscanf(str,"[%64[^]]]:%32[^,]%n",host,port,&pos)) {
             fprintf(stderr, "%s: ipv6 parse error (%s)\n",
                     __FUNCTION__, str);
-            return -1;
+            goto fail;
         }
-        qemu_opt_set(opts, "ipv6", "on");
+        addr->has_ipv6 = addr->ipv6 = true;
     } else if (qemu_isdigit(str[0])) {
         /* IPv4 addr */
-        if (2 != sscanf(str,"%64[0-9.]:%32[^,]%n",addr,port,&pos)) {
+        if (2 != sscanf(str,"%64[0-9.]:%32[^,]%n",host,port,&pos)) {
             fprintf(stderr, "%s: ipv4 parse error (%s)\n",
                     __FUNCTION__, str);
-            return -1;
+            goto fail;
         }
-        qemu_opt_set(opts, "ipv4", "on");
+        addr->has_ipv4 = addr->ipv4 = true;
     } else {
         /* hostname */
-        if (2 != sscanf(str,"%64[^:]:%32[^,]%n",addr,port,&pos)) {
+        if (2 != sscanf(str,"%64[^:]:%32[^,]%n",host,port,&pos)) {
             fprintf(stderr, "%s: hostname parse error (%s)\n",
                     __FUNCTION__, str);
-            return -1;
+            goto fail;
         }
     }
-    qemu_opt_set(opts, "host", addr);
-    qemu_opt_set(opts, "port", port);
+    g_free(addr->host);
+    g_free(addr->port);
+    addr->host = g_strdup(host);
+    addr->port = g_strdup(port);
 
     /* parse options */
     optstr = str + pos;
     h = strstr(optstr, ",to=");
-    if (h)
-        qemu_opt_set(opts, "to", h+4);
-    if (strstr(optstr, ",ipv4"))
-        qemu_opt_set(opts, "ipv4", "on");
-    if (strstr(optstr, ",ipv6"))
-        qemu_opt_set(opts, "ipv6", "on");
+    if (h) {
+        addr->to = atoi(h+4);
+    }
+    if (strstr(optstr, ",ipv4")) {
+        addr->has_ipv4 = addr->ipv4 = true;
+    }
+    if (strstr(optstr, ",ipv6")) {
+        addr->has_ipv6 = addr->ipv6 = true;
+    }
     return 0;
+
+fail:
+    qapi_free_IPSocketAddress(addr);
+    *p_addr = NULL;
+    return -1;
 }
 
 int inet_listen(const char *str, char *ostr, int olen,
                 int socktype, int port_offset, Error **errp)
 {
-    QemuOpts *opts;
+    IPSocketAddress *addr;
     char *optstr;
     int sock = -1;
 
-    opts = qemu_opts_create(&socket_opts, NULL, 0, NULL);
-    if (inet_parse(opts, str) == 0) {
-        sock = inet_listen_opts(opts, port_offset, errp);
+    if (inet_parse(&addr, str) == 0) {
+        sock = inet_listen_opts(addr, port_offset, errp);
         if (sock != -1 && ostr) {
             optstr = strchr(str, ',');
-            if (qemu_opt_get_bool(opts, "ipv6", 0)) {
+            if (addr->has_ipv6 && addr->ipv6) {
                 snprintf(ostr, olen, "[%s]:%s%s",
-                         qemu_opt_get(opts, "host"),
-                         qemu_opt_get(opts, "port"),
+                         addr->host, addr->port,
                          optstr ? optstr : "");
             } else {
                 snprintf(ostr, olen, "%s:%s%s",
-                         qemu_opt_get(opts, "host"),
-                         qemu_opt_get(opts, "port"),
+                         addr->host, addr->port,
                          optstr ? optstr : "");
             }
         }
     } else {
         error_set(errp, QERR_SOCKET_CREATE_FAILED);
     }
-    qemu_opts_del(opts);
+    qapi_free_IPSocketAddress(addr);
     return sock;
 }
 
 int inet_connect(const char *str, bool block, bool *in_progress, Error **errp)
 {
-    QemuOpts *opts;
+    IPSocketAddress *addr;
     int sock = -1;
 
-    opts = qemu_opts_create(&socket_opts, NULL, 0, NULL);
-    if (inet_parse(opts, str) == 0) {
-        sock = inet_connect_opts(opts, block, in_progress, errp);
+    if (inet_parse(&addr, str) == 0) {
+        sock = inet_connect_opts(addr, block, in_progress, errp);
     } else {
         error_set(errp, QERR_SOCKET_CREATE_FAILED);
     }
-    qemu_opts_del(opts);
+    qapi_free_IPSocketAddress(addr);
     return sock;
 }
 

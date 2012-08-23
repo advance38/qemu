@@ -41,11 +41,11 @@ void socket_set_nonblock(int fd);
 int send_all(int fd, const void *buf, int len1);
 
 /* New, ipv6-ready socket helper functions, see qemu-sockets.c */
-int inet_parse(QemuOpts *opts, const char *str);
-int inet_listen_opts(QemuOpts *opts, int port_offset, Error **errp);
+int inet_parse(IPSocketAddress **p_addr, const char *str);
+int inet_listen_opts(IPSocketAddress *addr, int port_offset, Error **errp);
 int inet_listen(const char *str, char *ostr, int olen,
                 int socktype, int port_offset, Error **errp);
-int inet_connect_opts(QemuOpts *opts, bool block, bool *in_progress, Error **errp);
+int inet_connect_opts(IPSocketAddress *addr, bool block, bool *in_progress, Error **errp);
 int inet_connect(const char *str, bool block, bool *in_progress, Error **errp);
 int inet_dgram_opts(QemuOpts *opts);
 const char *inet_strfamily(int family);

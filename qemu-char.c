@@ -2435,19 +2435,30 @@ static CharDriverState *qemu_chr_open_socket(QemuOpts *opts)
     SocketOptions *opt;
     IPSocketOptions *ip_opt = NULL;
     UnixSocketOptions *unix_opt = NULL;
+    Error *errp = NULL;
 
     int is_unix = qemu_opt_get(opts, "path") != NULL;
 
     OptsVisitor *ov = opts_visitor_new(opts);
     Visitor *v = opts_get_visitor(ov);
+    char *backend = NULL, *id = NULL;
+    visit_type_str(v, &backend, "backend", NULL);
+    visit_type_str(v, &id, "id", NULL);
     if (!is_unix) {
-        visit_type_IPSocketOptions(v, (IPSocketOptions **)&ip_opt, NULL, NULL);
+        visit_type_IPSocketOptions(v, (IPSocketOptions **)&ip_opt, NULL, &errp);
 	opt = ip_opt->sockopts;
     } else {
-        visit_type_UnixSocketOptions(v, (UnixSocketOptions **)&unix_opt, NULL, NULL);
+        visit_type_UnixSocketOptions(v, (UnixSocketOptions **)&unix_opt, NULL, &errp);
         opt = unix_opt->sockopts;
     }
     opts_visitor_cleanup(ov);
+    g_free(backend);
+    g_free(id);
+
+    if (errp) {
+        qerror_report_err(errp);
+        goto fail;
+    }
 
     /* Default off.  */
     opt->server &= opt->has_server;
@@ -2472,9 +2483,9 @@ static CharDriverState *qemu_chr_open_socket(QemuOpts *opts)
         }
     } else {
         if (opt->server) {
-            fd = inet_listen_opts(opts, 0, NULL);
+            fd = inet_listen_opts(ip_opt->addr, 0, NULL);
         } else {
-            fd = inet_connect_opts(opts, opt->wait, NULL, NULL);
+            fd = inet_connect_opts(ip_opt->addr, opt->wait, NULL, NULL);
         }
     }
     if (fd < 0) {
@@ -2514,15 +2525,15 @@ static CharDriverState *qemu_chr_open_socket(QemuOpts *opts)
     chr->filename = g_malloc(256);
     if (is_unix) {
         snprintf(chr->filename, 256, "unix:%s%s",
-                 qemu_opt_get(opts, "path"),
+                 unix_opt->addr->path,
                  opt->server ? ",server" : "");
     } else if (opt->telnet) {
         snprintf(chr->filename, 256, "telnet:%s:%s%s",
-                 qemu_opt_get(opts, "host"), qemu_opt_get(opts, "port"),
+                 ip_opt->addr->host, ip_opt->addr->port,
                  opt->server ? ",server" : "");
     } else {
         snprintf(chr->filename, 256, "tcp:%s:%s%s",
-                 qemu_opt_get(opts, "host"), qemu_opt_get(opts, "port"),
+                 ip_opt->addr->host, ip_opt->addr->port,
                  opt->server ? ",server" : "");
     }
 

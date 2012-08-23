@@ -30,36 +30,17 @@ static void nbd_accept(void *opaque)
     }
 }
 
-static void nbd_server_start(QemuOpts *opts, Error **errp)
+void qmp_nbd_server_start(IPSocketAddress *addr, Error **errp)
 {
     if (server_fd != -1) {
         /* TODO: error */
         return;
     }
 
-    server_fd = inet_listen_opts(opts, 0, errp);
+    server_fd = inet_listen_opts(addr, 0, errp);
     if (server_fd != -1) {
         qemu_set_fd_handler2(server_fd, NULL, nbd_accept, NULL, NULL);
     }
-}
-
-void qmp_nbd_server_start(IPSocketAddress *addr, Error **errp)
-{
-    QemuOpts *opts;
-
-    opts = qemu_opts_create(&socket_opts, NULL, 0, NULL);
-    qemu_opt_set(opts, "host", addr->host);
-    qemu_opt_set(opts, "port", addr->port);
-
-    addr->ipv4 |= !addr->has_ipv4;
-    addr->ipv6 |= !addr->has_ipv6;
-    if (!addr->ipv4 || !addr->ipv6) {
-        qemu_opt_set_bool(opts, "ipv4", addr->ipv4);
-        qemu_opt_set_bool(opts, "ipv6", addr->ipv6);
-    }
-
-    nbd_server_start(opts, errp);
-    qemu_opts_del(opts);
 }
 
 /* Hook into the BlockDriverState notifiers to close the export when
