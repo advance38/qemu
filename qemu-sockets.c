@@ -31,34 +31,6 @@
 
 static const int on=1, off=0;
 
-/* used temporarely until all users are converted to QemuOpts */
-static QemuOptsList dummy_opts = {
-    .name = "dummy",
-    .head = QTAILQ_HEAD_INITIALIZER(dummy_opts.head),
-    .desc = {
-        {
-            .name = "path",
-            .type = QEMU_OPT_STRING,
-        },{
-            .name = "host",
-            .type = QEMU_OPT_STRING,
-        },{
-            .name = "port",
-            .type = QEMU_OPT_STRING,
-        },{
-            .name = "to",
-            .type = QEMU_OPT_NUMBER,
-        },{
-            .name = "ipv4",
-            .type = QEMU_OPT_BOOL,
-        },{
-            .name = "ipv6",
-            .type = QEMU_OPT_BOOL,
-        },
-        { /* end if list */ }
-    },
-};
-
 static int inet_getport(struct addrinfo *e)
 {
     struct sockaddr_in *i4;
