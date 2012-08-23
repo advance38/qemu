@@ -54,9 +54,6 @@ static QemuOptsList dummy_opts = {
         },{
             .name = "ipv6",
             .type = QEMU_OPT_BOOL,
-        },{
-            .name = "block",
-            .type = QEMU_OPT_BOOL,
         },
         { /* end if list */ }
     },
@@ -209,7 +206,7 @@ listen:
     return slisten;
 }
 
-int inet_connect_opts(QemuOpts *opts, bool *in_progress, Error **errp)
+int inet_connect_opts(QemuOpts *opts, bool block, bool *in_progress, Error **errp)
 {
     struct addrinfo ai,*res,*e;
     const char *addr;
@@ -217,7 +214,6 @@ int inet_connect_opts(QemuOpts *opts, bool *in_progress, Error **errp)
     char uaddr[INET6_ADDRSTRLEN+1];
     char uport[33];
     int sock,rc;
-    bool block;
 
     memset(&ai,0, sizeof(ai));
     ai.ai_flags = AI_CANONNAME | AI_ADDRCONFIG;
@@ -230,7 +226,6 @@ int inet_connect_opts(QemuOpts *opts, bool *in_progress, Error **errp)
 
     addr = qemu_opt_get(opts, "host");
     port = qemu_opt_get(opts, "port");
-    block = qemu_opt_get_bool(opts, "block", 0);
     if (addr == NULL || port == NULL) {
         fprintf(stderr, "inet_connect: host and/or port not specified\n");
         error_set(errp, QERR_SOCKET_CREATE_FAILED);
@@ -500,10 +495,7 @@ int inet_connect(const char *str, bool block, bool *in_progress, Error **errp)
 
     opts = qemu_opts_create(&dummy_opts, NULL, 0, NULL);
     if (inet_parse(opts, str) == 0) {
-        if (block) {
-            qemu_opt_set(opts, "block", "on");
-        }
-        sock = inet_connect_opts(opts, in_progress, errp);
+        sock = inet_connect_opts(opts, block, in_progress, errp);
     } else {
         error_set(errp, QERR_SOCKET_CREATE_FAILED);
     }
