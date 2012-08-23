@@ -1248,6 +1248,35 @@ Remove all matches from the access control list, and set the default
 policy back to @code{deny}.
 ETEXI
 
+    {
+        .name       = "nbd_server_start",
+        .args_type  = "writable:-w,uri:s",
+        .params     = "nbd_server_start [-w] host:port",
+        .help       = "serve block devices on the given host and port",
+        .mhandler.cmd = hmp_nbd_server_start,
+    },
+STEXI
+@item nbd_server_start @var{host}:@var{port}
+@findex nbd_server_start
+Start an NBD server on the given host and/or port, and serve all of the
+virtual machine's block devices that have an inserted media on it.
+The @option{-w} option makes the devices writable.
+ETEXI
+
+    {
+        .name       = "nbd_server_stop",
+        .args_type  = "",
+        .params     = "nbd_server_stop",
+        .help       = "stop serving block devices using the NBD protocol",
+        .mhandler.cmd = hmp_nbd_server_stop,
+    },
+STEXI
+@item nbd_server_stop
+@findex nbd_server_stop
+Stop the QEMU embedded NBD server.
+ETEXI
+
+
 #if defined(TARGET_I386)
 
     {

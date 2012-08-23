@@ -18,6 +18,7 @@
 #include "qemu-option.h"
 #include "qemu-timer.h"
 #include "qmp-commands.h"
+#include "qemu_socket.h"
 #include "monitor.h"
 
 static void hmp_handle_error(Monitor *mon, Error **errp)
@@ -1100,5 +1101,56 @@ void hmp_closefd(Monitor *mon, const QDict *qdict)
     Error *errp = NULL;
 
     qmp_closefd(fdname, &errp);
+    hmp_handle_error(mon, &errp);
+}
+
+void hmp_nbd_server_start(Monitor *mon, const QDict *qdict)
+{
+    const char *uri = qdict_get_str(qdict, "uri");
+    int writable = qdict_get_try_bool(qdict, "writable", 0);
+    Error *errp = NULL;
+    BlockDriverState *bs;
+    IPSocketAddress *addr;
+
+    /* First check if the address is available and start the server.  */
+    if (inet_parse(&addr, uri) == 0) {
+        qmp_nbd_server_start(addr, &errp);
+    } else {
+        error_set(&errp, QERR_SOCKET_CREATE_FAILED);
+    }
+    qapi_free_IPSocketAddress(addr);
+
+    if (errp != NULL) {
+        goto exit;
+    }
+
+    /* Then try adding all block devices.  If one fails, close all and
+     * exit.
+     */
+    bs = NULL;
+    while ((bs = bdrv_next(bs))) {
+        if (!bdrv_is_inserted(bs)) {
+            continue;
+        }
+
+        qmp_nbd_server_add(bdrv_get_device_name(bs),
+                           true, !bdrv_is_read_only(bs) && writable,
+                           &errp);
+
+        if (errp != NULL) {
+            qmp_nbd_server_stop(NULL);
+            break;
+        }
+    }
+
+exit:
+    hmp_handle_error(mon, &errp);
+}
+
+void hmp_nbd_server_stop(Monitor *mon, const QDict *qdict)
+{
+    Error *errp = NULL;
+
+    qmp_nbd_server_stop(&errp);
     hmp_handle_error(mon, &errp);
 }
