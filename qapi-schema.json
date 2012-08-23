@@ -2275,6 +2275,122 @@
     'opts': 'NetClientOptions' } }
 
 ##
+# @SocketOptions
+#
+# @server: if true, create a listening socket, default false
+#
+# @wait: if true, wait for a client to connect before proceeding, default true
+#
+# @telnet: if true, do telnet option negotiation, default false
+#
+# @delay: if true, disable Nagle's algorithm, default true
+##
+{ 'type': 'SocketOptions',
+  'data': {
+    '*server': 'bool',
+    '*wait': 'bool',
+    '*telnet': 'bool',
+    '*delay': 'bool' } }
+
+##
+# @IPDatagramAddress
+#
+# Captures the source and destination address of a UDP socket
+#
+# @host: host part of the destination address, default localhost
+#
+# @port: port part of the destination address
+#
+# @localaddr: host part of the source address, default localhost
+#
+# @localport: port part of the source address, default chosen by OS
+#
+# @ipv4: whether to accept IPv4 addresses, default try both IPv4 and IPv6
+#
+# @ipv6: whether to accept IPv6 addresses, default try both IPv4 and IPv6
+#
+# Since 1.3
+##
+{ 'type': 'IPDatagramAddress',
+  'data': {
+    '*host': 'str',
+    'port': 'str',
+    '*localaddr': 'str',
+    '*localport': 'str',
+    '*ipv4': 'bool',
+    '*ipv6': 'bool', } }
+
+##
+# @IPSocketAddress
+#
+# Captures the destination address of an IP socket
+#
+# @host: host part of the address
+#
+# @port: port part of the address, or lowest port if @to is present
+#
+# @to: highest port to try
+#
+# @ipv4: whether to accept IPv4 addresses, default try both IPv4 and IPv6
+#
+# @ipv6: whether to accept IPv6 addresses, default try both IPv4 and IPv6
+#
+# Since 1.3
+##
+{ 'type': 'IPSocketAddress',
+  'data': {
+    'host': 'str',
+    'port': 'str',
+    '*to': 'uint16',
+    '*ipv4': 'bool',
+    '*ipv6': 'bool' } }
+
+##
+# @UnixSocketAddress
+#
+# Captures the destination address of an IP socket
+#
+# @path: filesystem path to use
+#
+# Since 1.3
+##
+{ 'type': 'UnixSocketAddress',
+  'data': {
+    'path': 'str' } }
+
+##
+# @IPSocketOptions
+#
+# Captures the options needed to create an IP socket
+#
+# @addr: address to bind or connect to
+#
+# @sockopts: options to use
+#
+# Since 1.3
+##
+{ 'type': 'IPSocketOptions',
+  'data': {
+    'addr': 'IPSocketAddress',
+    'sockopts': 'SocketOptions' } }
+
+##
+# @UnixSocketOptions
+#
+# Captures the destination address of an IP socket
+#
+# @addr: address to bind or connect to
+#
+# @sockopts: options to use
+#
+# Since 1.3
+##
+{ 'type': 'UnixSocketOptions',
+  'data': {
+    'addr': 'UnixSocketAddress',
+    'sockopts': 'SocketOptions' } }
+
+##
 # @getfd:
 #
 # Receive a file descriptor via SCM rights and assign it a name
