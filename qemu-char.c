@@ -32,6 +32,8 @@
 #include "hw/baum.h"
 #include "hw/msmouse.h"
 #include "qmp-commands.h"
+#include "qapi/opts-visitor.h"
+#include "qapi-visit.h"
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -2430,49 +2432,64 @@ static CharDriverState *qemu_chr_open_socket(QemuOpts *opts)
     CharDriverState *chr = NULL;
     TCPCharDriver *s = NULL;
     int fd = -1;
-    int is_listen;
-    int is_waitconnect;
-    int do_nodelay;
-    int is_unix;
-    int is_telnet;
+    SocketOptions *opt;
+    IPSocketOptions *ip_opt = NULL;
+    UnixSocketOptions *unix_opt = NULL;
 
-    is_listen      = qemu_opt_get_bool(opts, "server", 0);
-    is_waitconnect = qemu_opt_get_bool(opts, "wait", 1);
-    is_telnet      = qemu_opt_get_bool(opts, "telnet", 0);
-    do_nodelay     = !qemu_opt_get_bool(opts, "delay", 1);
-    is_unix        = qemu_opt_get(opts, "path") != NULL;
-    if (!is_listen)
-        is_waitconnect = 0;
+    int is_unix = qemu_opt_get(opts, "path") != NULL;
+
+    OptsVisitor *ov = opts_visitor_new(opts);
+    Visitor *v = opts_get_visitor(ov);
+    if (!is_unix) {
+        visit_type_IPSocketOptions(v, (IPSocketOptions **)&ip_opt, NULL, NULL);
+	opt = ip_opt->sockopts;
+    } else {
+        visit_type_UnixSocketOptions(v, (UnixSocketOptions **)&unix_opt, NULL, NULL);
+        opt = unix_opt->sockopts;
+    }
+    opts_visitor_cleanup(ov);
+
+    /* Default off.  */
+    opt->server &= opt->has_server;
+    opt->telnet &= opt->has_telnet;
+
+    /* Default on.  */
+    opt->wait   |= !opt->has_wait;
+    opt->delay  |= !opt->has_delay;
+
+    if (!opt->server) {
+        opt->wait = 0;
+    }
 
     chr = g_malloc0(sizeof(CharDriverState));
     s = g_malloc0(sizeof(TCPCharDriver));
 
     if (is_unix) {
-        if (is_listen) {
+        if (opt->server) {
             fd = unix_listen_opts(opts);
         } else {
             fd = unix_connect_opts(opts);
         }
     } else {
-        if (is_listen) {
+        if (opt->server) {
             fd = inet_listen_opts(opts, 0, NULL);
         } else {
-            fd = inet_connect_opts(opts, is_waitconnect, NULL, NULL);
+            fd = inet_connect_opts(opts, opt->wait, NULL, NULL);
         }
     }
     if (fd < 0) {
         goto fail;
     }
-
-    if (!is_waitconnect)
+    if (!opt->wait) {
         socket_set_nonblock(fd);
+    }
 
     s->connected = 0;
     s->fd = -1;
     s->listen_fd = -1;
     s->msgfd = -1;
     s->is_unix = is_unix;
-    s->do_nodelay = do_nodelay && !is_unix;
+    s->do_nodelay = opt->delay && !is_unix;
 
     chr->opaque = s;
     chr->chr_write = tcp_chr_write;
@@ -2480,12 +2497,12 @@ static CharDriverState *qemu_chr_open_socket(QemuOpts *opts)
     chr->get_msgfd = tcp_get_msgfd;
     chr->chr_add_client = tcp_chr_add_client;
 
-    if (is_listen) {
+    if (opt->server) {
         s->listen_fd = fd;
         qemu_set_fd_handler2(s->listen_fd, NULL, tcp_chr_accept, NULL, chr);
-        if (is_telnet)
+        if (opt->telnet) {
             s->do_telnetopt = 1;
-
+        }
     } else {
         s->connected = 1;
         s->fd = fd;
@@ -2498,26 +2515,31 @@ static CharDriverState *qemu_chr_open_socket(QemuOpts *opts)
     if (is_unix) {
         snprintf(chr->filename, 256, "unix:%s%s",
                  qemu_opt_get(opts, "path"),
-                 qemu_opt_get_bool(opts, "server", 0) ? ",server" : "");
-    } else if (is_telnet) {
+                 opt->server ? ",server" : "");
+    } else if (opt->telnet) {
         snprintf(chr->filename, 256, "telnet:%s:%s%s",
                  qemu_opt_get(opts, "host"), qemu_opt_get(opts, "port"),
-                 qemu_opt_get_bool(opts, "server", 0) ? ",server" : "");
+                 opt->server ? ",server" : "");
     } else {
         snprintf(chr->filename, 256, "tcp:%s:%s%s",
                  qemu_opt_get(opts, "host"), qemu_opt_get(opts, "port"),
-                 qemu_opt_get_bool(opts, "server", 0) ? ",server" : "");
+                 opt->server ? ",server" : "");
     }
 
-    if (is_listen && is_waitconnect) {
+    if (opt->server && opt->wait) {
         printf("QEMU waiting for connection on: %s\n",
                chr->filename);
         tcp_chr_accept(chr);
         socket_set_nonblock(s->listen_fd);
     }
+
+    qapi_free_IPSocketOptions(ip_opt);
+    qapi_free_UnixSocketOptions(unix_opt);
     return chr;
 
  fail:
+    qapi_free_IPSocketOptions(ip_opt);
+    qapi_free_UnixSocketOptions(unix_opt);
     if (fd >= 0)
         closesocket(fd);
     g_free(s);
