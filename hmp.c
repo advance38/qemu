@@ -18,6 +18,7 @@
 #include "qemu-option.h"
 #include "qemu-timer.h"
 #include "qmp-commands.h"
+#include "qemu_socket.h"
 #include "monitor.h"
 
 static void hmp_handle_error(Monitor *mon, Error **errp)
@@ -1100,5 +1101,70 @@ void hmp_closefd(Monitor *mon, const QDict *qdict)
     Error *errp = NULL;
 
     qmp_closefd(fdname, &errp);
+    hmp_handle_error(mon, &errp);
+}
+
+void hmp_nbd_server_start(Monitor *mon, const QDict *qdict)
+{
+    const char *uri = qdict_get_str(qdict, "uri");
+    int writable = qdict_get_try_bool(qdict, "writable", 0);
+    Error *errp = NULL;
+    QemuOpts *opts;
+    BlockDriverState *bs;
+    IPSocketAddress addr;
+
+    /* First check if the address is available and start the server.  */
+    opts = qemu_opts_create(&socket_opts, NULL, 0, NULL);
+    if (inet_parse(opts, uri) != 0) {
+        error_set(&errp, QERR_SOCKET_CREATE_FAILED);
+	goto exit;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.host = (char *) qemu_opt_get(opts, "host");
+    addr.port = (char *) qemu_opt_get(opts, "port");
+    addr.ipv4 = qemu_opt_get_bool(opts, "ipv4", 0);
+    addr.ipv6 = qemu_opt_get_bool(opts, "ipv6", 0);
+    addr.has_ipv4 = addr.has_ipv6 = true;
+
+    if (addr.host == NULL || addr.port == NULL) {
+        error_set(&errp, QERR_SOCKET_CREATE_FAILED);
+        goto exit;
+    }
+
+    qmp_nbd_server_start(&addr, &errp);
+    if (errp != NULL) {
+        goto exit;
+    }
+
+    /* Then try adding all block devices.  If one fails, close all and
+     * exit.
+     */
+    bs = NULL;
+    while ((bs = bdrv_next(bs))) {
+        if (!bdrv_is_inserted(bs)) {
+            continue;
+        }
+
+        qmp_nbd_server_add(bdrv_get_device_name(bs),
+                           true, !bdrv_is_read_only(bs) && writable,
+                           &errp);
+
+        if (errp != NULL) {
+            qmp_nbd_server_stop(NULL);
+            break;
+        }
+    }
+
+exit:
+    qemu_opts_del(opts);
+    hmp_handle_error(mon, &errp);
+}
+
+void hmp_nbd_server_stop(Monitor *mon, const QDict *qdict)
+{
+    Error *errp = NULL;
+
+    qmp_nbd_server_stop(&errp);
     hmp_handle_error(mon, &errp);
 }
