@@ -407,7 +407,7 @@ err:
 }
 
 /* compatibility wrapper */
-static int inet_parse(QemuOpts *opts, const char *str)
+int inet_parse(QemuOpts *opts, const char *str)
 {
     const char *optstr, *h;
     char addr[64];

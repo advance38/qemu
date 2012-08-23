@@ -41,6 +41,7 @@ void socket_set_nonblock(int fd);
 int send_all(int fd, const void *buf, int len1);
 
 /* New, ipv6-ready socket helper functions, see qemu-sockets.c */
+int inet_parse(QemuOpts *opts, const char *str);
 int inet_listen_opts(QemuOpts *opts, int port_offset, Error **errp);
 int inet_listen(const char *str, char *ostr, int olen,
                 int socktype, int port_offset, Error **errp);
