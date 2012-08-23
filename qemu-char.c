@@ -2477,9 +2477,9 @@ static CharDriverState *qemu_chr_open_socket(QemuOpts *opts)
 
     if (is_unix) {
         if (opt->server) {
-            fd = unix_listen_opts(opts);
+            fd = unix_listen_opts(unix_opt->addr);
         } else {
-            fd = unix_connect_opts(opts);
+            fd = unix_connect_opts(unix_opt->addr);
         }
     } else {
         if (opt->server) {
