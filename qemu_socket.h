@@ -50,9 +50,9 @@ int inet_connect(const char *str, bool block, bool *in_progress, Error **errp);
 int inet_dgram_opts(QemuOpts *opts);
 const char *inet_strfamily(int family);
 
-int unix_listen_opts(QemuOpts *opts);
+int unix_listen_opts(UnixSocketAddress *addr);
 int unix_listen(const char *path, char *ostr, int olen);
-int unix_connect_opts(QemuOpts *opts);
+int unix_connect_opts(UnixSocketAddress *addr);
 int unix_connect(const char *path);
 
 /* Old, ipv4 only bits.  Don't use for new code. */
