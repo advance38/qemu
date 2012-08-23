@@ -44,7 +44,7 @@ int inet_listen(const char *str, char *ostr, int olen,
                 int socktype, int port_offset, Error **errp);
 int inet_connect_opts(IPSocketAddress *addr, bool block, bool *in_progress, Error **errp);
 int inet_connect(const char *str, bool block, bool *in_progress, Error **errp);
-int inet_dgram_opts(QemuOpts *opts);
+int inet_dgram_opts(IPDatagramAddress *addr);
 const char *inet_strfamily(int family);
 
 int unix_listen_opts(UnixSocketAddress *addr);
