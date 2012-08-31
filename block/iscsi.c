@@ -543,7 +543,8 @@ iscsi_aio_ioctl_cb(struct iscsi_context *iscsi, int status,
 
 #define SG_ERR_DRIVER_SENSE    0x08
 
-    if (status == SCSI_STATUS_CHECK_CONDITION && acb->task->datain.size >= 2) {
+    if (status == SCSI_STATUS_CHECK_CONDITION
+    && acb->task->datain.size >= 2) {
         int ss;
 
         acb->ioh->driver_status |= SG_ERR_DRIVER_SENSE;
@@ -628,9 +629,17 @@ static BlockDriverAIOCB *iscsi_aio_ioctl(BlockDriverState *bs,
     return &acb->common;
 }
 
+
+static void ioctl_cb(void *opaque, int status)
+{
+    int *p_status = opaque;
+    *p_status = status;
+}
+
 static int iscsi_ioctl(BlockDriverState *bs, unsigned long int req, void *buf)
 {
     IscsiLun *iscsilun = bs->opaque;
+    int status;
 
     switch (req) {
     case SG_GET_VERSION_NUM:
@@ -639,6 +648,15 @@ static int iscsi_ioctl(BlockDriverState *bs, unsigned long int req, void *buf)
     case SG_GET_SCSI_ID:
         ((struct sg_scsi_id *)buf)->scsi_type = iscsilun->type;
         break;
+    case SG_IO:
+        status = -EINPROGRESS;
+        iscsi_aio_ioctl(bs, req, buf, ioctl_cb, &status);
+
+        while (status == -EINPROGRESS) {
+            qemu_aio_wait();
+        }
+
+        return 0;
     default:
         return -1;
     }
