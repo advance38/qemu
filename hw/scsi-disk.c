@@ -1455,8 +1455,15 @@ static inline bool check_lba_range(uint64_t sector_num, uint32_t nb_sectors)
      * The first line tests that no overflow happens when computing the last
      * sector.  The second line tests that the last accessed sector is in
      * range.
+     *
+     * A 0-block read or write is special, because a 0-block read is invalid
+     * also for the first non-existent block.  So, treat it is if it were
+     * reading one block.  This also removes the worries of underflowing
+     * in the computation of sector_num + nb_sectors - 1.
      */
-    return (sector_num <= sector_num + nb_sectors &&
+    nb_sectors = MAX(nb_sectors, 1);
+
+    return (sector_num <= sector_num + nb_sectors - 1 &&
             sector_num + nb_sectors - 1 <= s->qdev.max_lba);
 }
 
